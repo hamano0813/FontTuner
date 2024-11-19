@@ -11,11 +11,18 @@ if exist .venv (
     pip install -r requirements.txt
 )
 
+set "files="
+
 :loop
-if "%~1"=="" goto end
-python -B src\main.py "%~1"
+if "%~1"=="" goto run
+set "files=%files% "%~1""
 shift
 goto loop
 
+:run
+python -B src\main.py %files%
+goto end
+
 :end
+
 pause
