@@ -125,7 +125,9 @@ def save_metadata(font_setting: dict):
         if key in ("fsSelection", "usWeightClass", "fontPath"):
             continue
         nameID, platformID, platEncID, langID = key
-        if nameID not in (1, 2, 3, 4, 6) and value:
+        p_family = font_setting.get((16, platformID, platEncID, langID), "")
+        s_family = font_setting.get((17, platformID, platEncID, langID), "")
+        if nameID not in (1, 2, 3, 4, 6) and value and p_family and s_family:
             font["name"].setName(value, nameID, platformID, platEncID, langID)
 
     font.save(font_setting["fontPath"])
