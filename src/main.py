@@ -6,24 +6,28 @@ import pandas as pd
 import metadata
 import utils
 
+
 if __name__ == "__main__":
     paths = sys.argv[1:]
-    if not paths:
-        print("please drag and drop font files or font directory to this script")
-        sys.exit(1)
 
-    if paths[0].endswith(".xlsx"):
-        df = pd.read_excel(paths[0], engine="openpyxl", dtype=str, na_values=None, keep_default_na=False)
+    path_list = []
+    for path in paths:
+        if os.path.isdir(path):
+            for root, _, files in os.walk(path):
+                for file in files:
+                    path_list.append(os.path.join(root, file))
+        else:
+            path_list.append(path)
 
-        metadata.save(df)
-    else:
-        font_paths = []
-        for path in paths:
-            if os.path.isdir(path):
-                for root, _, files in os.walk(path):
-                    for file in files:
-                        font_paths.append(os.path.join(root, file))
-            else:
-                font_paths.append(path)
-        df = metadata.load([path for path in font_paths if path.lower().endswith((".ttf", ".otf"))])
-        utils.save_meta(df)
+    if not path_list and os.path.exists("metadata.xlsx"):
+        path_list.append("metadata.xlsx")
+
+    metadata_df = metadata.load([path for path in path_list if path.lower().endswith((".ttf", ".otf"))])
+    utils.write_excel(metadata_df)
+
+    dfs = [
+        pd.read_excel(path, sheet_name="metadata", engine="openpyxl", dtype=str, na_values="", keep_default_na=False)
+        for path in path_list
+        if path.lower().endswith(".xlsx")
+    ]
+    metadata.save(dfs)

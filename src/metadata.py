@@ -136,13 +136,14 @@ def rename_font(font_setting: dict):
         os.rename(origin_path, new_path)
 
 
-def save(metadata_df: pd.DataFrame):
-    metadata_df["fsSelection"] = metadata_df["fsSelection"].astype(int)
-    metadata_df["usWeightClass"] = metadata_df["usWeightClass"].astype(int)
+def save(dfs: list[pd.DataFrame]):
+    for metadata_df in dfs:
+        metadata_df["fsSelection"] = metadata_df["fsSelection"].astype(int)
+        metadata_df["usWeightClass"] = metadata_df["usWeightClass"].astype(int)
 
-    new_columns = {col: ast.literal_eval(col) if col.startswith("(") else col for col in metadata_df.columns}
-    metadata_df.rename(columns=new_columns, inplace=True)
+        new_columns = {col: ast.literal_eval(col) if col.startswith("(") else col for col in metadata_df.columns}
+        metadata_df.rename(columns=new_columns, inplace=True)
 
-    for _, font_setting in metadata_df.iterrows():
-        save_metadata(font_setting)
-        rename_font(font_setting)
+        for _, font_setting in metadata_df.iterrows():
+            save_metadata(font_setting)
+            rename_font(font_setting)

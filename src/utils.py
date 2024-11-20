@@ -29,7 +29,7 @@ def init_style():
     return header, table
 
 
-def save_meta(metadata_df: pd.DataFrame):
+def write_excel(metadata_df: pd.DataFrame):
     writer = pd.ExcelWriter("metadata.xlsx", engine="openpyxl")
     header, table = init_style()
     metadata_df.to_excel(writer, sheet_name="metadata", index=False)
