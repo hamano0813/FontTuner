@@ -4,6 +4,8 @@ import os
 import pandas as pd
 from fontTools.ttLib import TTFont
 
+from weight import FONT_WEIGHT
+
 
 def load_metadata(font: TTFont):
     font_setting = {
@@ -55,6 +57,29 @@ def load(font_paths: list[str]):
     return metadata_df[new_columns]
 
 
+def prepare_metadata(font: TTFont, font_setting: dict):
+    langIDs = set()
+
+    for key in font_setting.keys():
+        if key in ("fsSelection", "usWeightClass", "fontPath"):
+            continue
+        nameID, platformID, platEncID, langID = key
+        if nameID == 16:
+            if not (p_family := font_setting.get((16, platformID, platEncID, langID), "")):
+                font["name"].removeNames(platformID=platformID, platEncID=platEncID, langID=langID)
+            else:
+                langIDs.add((platformID, platEncID, langID))
+                if not font_setting.get((17, platformID, platEncID, langID), ""):
+                    weight = font["OS/2"].usWeightClass
+                    if p_family.isascii():
+                        font_setting[(17, platformID, platEncID, langID)] = FONT_WEIGHT.get(weight, ("", ""))[0]
+                    else:
+                        font_setting[(17, platformID, platEncID, langID)] = FONT_WEIGHT.get(weight, ("", ""))[1]
+
+    langIDs = list(langIDs)
+    return langIDs
+
+
 def save_metadata(font_setting: dict):
     font = TTFont(font_setting["fontPath"])
     for key, value in font_setting.items():
@@ -63,16 +88,7 @@ def save_metadata(font_setting: dict):
         elif key == "usWeightClass":
             font["OS/2"].usWeightClass = value
 
-    langIDs = set()
-    for key, value in font_setting.items():
-        if key in ("fsSelection", "usWeightClass", "fontPath"):
-            continue
-        nameID, platformID, platEncID, langID = key
-        if nameID == 16 and not font_setting.get((16, platformID, platEncID, langID), ""):
-            font["name"].removeNames(platformID=platformID, platEncID=platEncID, langID=langID)
-        elif nameID == 16:
-            langIDs.add((platformID, platEncID, langID))
-    langIDs = list(langIDs)
+    langIDs = prepare_metadata(font, font_setting)
 
     for key, value in font_setting.items():
         if key in ("fsSelection", "usWeightClass", "fontPath"):
@@ -101,9 +117,6 @@ def save_metadata(font_setting: dict):
         # Full Name
         elif nameID == 4:
             font["name"].setName(f"{p_family} {s_family}", nameID, platformID, platEncID, langID)
-        # Version
-        elif nameID == 5:
-            font["name"].setName(value, nameID, platformID, platEncID, langID)
         # PostScript Name
         elif nameID == 6:
             for pid, eid, lid in langIDs:
@@ -112,7 +125,7 @@ def save_metadata(font_setting: dict):
                 if all((p_fam, s_fam)) and s_fam.isascii():
                     font["name"].setName(f"{p_fam}-{s_fam}".replace(" ", "-"), nameID, platformID, platEncID, langID)
                     break
-        elif nameID in (16, 17) and value:
+        elif nameID not in (1, 2, 3, 4, 6) and value:
             font["name"].setName(value, nameID, platformID, platEncID, langID)
 
     font.save(font_setting["fontPath"])
