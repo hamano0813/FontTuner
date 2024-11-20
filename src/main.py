@@ -23,11 +23,13 @@ if __name__ == "__main__":
         path_list.append("metadata.xlsx")
 
     metadata_df = metadata.load([path for path in path_list if path.lower().endswith((".ttf", ".otf"))])
-    utils.write_excel(metadata_df)
+    if not metadata_df.empty:
+        utils.write_excel(metadata_df)
 
     dfs = [
         pd.read_excel(path, sheet_name="metadata", engine="openpyxl", dtype=str, na_values="", keep_default_na=False)
         for path in path_list
         if path.lower().endswith(".xlsx")
     ]
-    metadata.save(dfs)
+    if dfs:
+        metadata.save(dfs)
