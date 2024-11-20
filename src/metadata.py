@@ -80,6 +80,8 @@ def save_metadata(font_setting: dict):
         nameID, platformID, platEncID, langID = key
         p_family = font_setting.get((16, platformID, platEncID, langID), "")
         s_family = font_setting.get((17, platformID, platEncID, langID), "")
+        if not all((p_family, s_family)):
+            continue
         # Font Family
         if nameID == 1:
             if font["OS/2"].usWeightClass not in (400, 700):
@@ -138,6 +140,7 @@ def rename_font(font_setting: dict):
 
 def save(dfs: list[pd.DataFrame]):
     for metadata_df in dfs:
+        metadata_df.fillna("", inplace=True)
         metadata_df["fsSelection"] = metadata_df["fsSelection"].astype(int)
         metadata_df["usWeightClass"] = metadata_df["usWeightClass"].astype(int)
 
