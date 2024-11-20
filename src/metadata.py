@@ -80,6 +80,36 @@ def prepare_metadata(font: TTFont, font_setting: dict):
     return langIDs
 
 
+def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
+    weight = font["OS/2"].usWeightClass
+
+    for platformID, platEncID, langID in langIDs:
+        p_family = font_setting.get((16, platformID, platEncID, langID), "")
+        s_family = font_setting.get((17, platformID, platEncID, langID), "")
+        # 1 Font Family
+        if weight not in (400, 700):
+            font["name"].setName(f"{p_family} {s_family}", 1, platformID, platEncID, langID)
+        else:
+            font["name"].setName(p_family, 1, platformID, platEncID, langID)
+        # 2 Font Subfamily
+        if weight != 700:
+            font["name"].setName("Regular", 2, platformID, platEncID, langID)
+        else:
+            font["name"].setName("Bold", 2, platformID, platEncID, langID)
+        # 3 Unique ID
+        unique_id = font_setting.get((3, platformID, platEncID, langID), "")
+        font["name"].setName(unique_id.format(p_family, s_family, *([""] * 3)), 3, platformID, platEncID, langID)
+        # 4 Full Name
+        font["name"].setName(f"{p_family} {s_family}", 4, platformID, platEncID, langID)
+        # 6 PostScript Name
+        for pid, eid, lid in langIDs:
+            p_fam = font_setting.get((16, pid, eid, lid), "")
+            s_fam = font_setting.get((17, pid, eid, lid), "")
+            if s_fam.isascii():
+                font["name"].setName(f"{p_fam}-{s_fam}".replace(" ", "-"), 6, platformID, platEncID, langID)
+                break
+
+
 def save_metadata(font_setting: dict):
     font = TTFont(font_setting["fontPath"])
     for key, value in font_setting.items():
@@ -89,43 +119,13 @@ def save_metadata(font_setting: dict):
             font["OS/2"].usWeightClass = value
 
     langIDs = prepare_metadata(font, font_setting)
+    fetch_metadata(font, font_setting, langIDs)
 
     for key, value in font_setting.items():
         if key in ("fsSelection", "usWeightClass", "fontPath"):
             continue
         nameID, platformID, platEncID, langID = key
-        p_family = font_setting.get((16, platformID, platEncID, langID), "")
-        s_family = font_setting.get((17, platformID, platEncID, langID), "")
-        if not all((p_family, s_family)):
-            continue
-        # Font Family
-        if nameID == 1:
-            if font["OS/2"].usWeightClass not in (400, 700):
-                font["name"].setName(f"{p_family} {s_family}", nameID, platformID, platEncID, langID)
-            else:
-                font["name"].setName(p_family, nameID, platformID, platEncID, langID)
-        # Font Subfamily
-        elif nameID == 2:
-            if font["OS/2"].usWeightClass != 700:
-                font["name"].setName("Regular", nameID, platformID, platEncID, langID)
-            else:
-                font["name"].setName("Bold", nameID, platformID, platEncID, langID)
-        # Unique ID
-        elif nameID == 3:
-            unique_id = font_setting.get((nameID, platformID, platEncID, langID), "")
-            font["name"].setName(unique_id.format(p_family, s_family, *([""] * 10)), nameID, platformID, platEncID, langID)
-        # Full Name
-        elif nameID == 4:
-            font["name"].setName(f"{p_family} {s_family}", nameID, platformID, platEncID, langID)
-        # PostScript Name
-        elif nameID == 6:
-            for pid, eid, lid in langIDs:
-                p_fam = font_setting.get((16, pid, eid, lid), "")
-                s_fam = font_setting.get((17, pid, eid, lid), "")
-                if all((p_fam, s_fam)) and s_fam.isascii():
-                    font["name"].setName(f"{p_fam}-{s_fam}".replace(" ", "-"), nameID, platformID, platEncID, langID)
-                    break
-        elif nameID not in (1, 2, 3, 4, 6) and value:
+        if nameID not in (1, 2, 3, 4, 6) and value:
             font["name"].setName(value, nameID, platformID, platEncID, langID)
 
     font.save(font_setting["fontPath"])
