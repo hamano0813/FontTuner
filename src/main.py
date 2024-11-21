@@ -4,7 +4,6 @@ import sys
 import metadata
 import utils
 
-
 if __name__ == "__main__":
     paths = sys.argv[1:]
 

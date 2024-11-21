@@ -4,7 +4,7 @@ import os
 import pandas as pd
 from fontTools.ttLib import TTFont
 
-from constants import FONT_WEIGHT, FONT_WIDTH, FONT_STYLE
+from constants import FONT_STYLE, FONT_WEIGHT, FONT_WIDTH
 
 
 def load_metadata(font: TTFont):

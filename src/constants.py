@@ -1,5 +1,3 @@
-import pandas as pd
-
 FONT_WEIGHT = {
     150: ("Hairline", "特丝"),
     200: ("Thin", "特纤"),
