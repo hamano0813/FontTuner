@@ -29,3 +29,23 @@ FONT_WIDTH = {
     8: ("ExtraExpanded", "超宽"),
     9: ("UltraExpanded", "特宽"),
 }
+
+FONT_STYLE = {
+    0b1 << 0: ("Italic", "斜体"),
+    0b1 << 1: ("Underline", "下划线"),
+    0b1 << 2: ("Negative", "反色"),
+    0b1 << 3: ("Outlined", "轮廓"),
+    0b1 << 4: ("Strikeout", "删除线"),
+    0b1 << 5: ("Bold", "粗体"),
+    0b1 << 6: ("Regular", "正常"),
+}
+
+MAC_STYLE = {
+    0b1 << 0: ("Bold", "粗体"),
+    0b1 << 1: ("Italic", "斜体"),
+    0b1 << 2: ("Underline", "下划线"),
+    0b1 << 3: ("Outline", "轮廓"),
+    0b1 << 4: ("Shadow", "阴影"),
+    0b1 << 5: ("Condensed", "窄体"),
+    0b1 << 6: ("Extended", "宽体"),
+}
