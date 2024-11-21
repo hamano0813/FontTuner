@@ -21,11 +21,11 @@ FONT_WEIGHT = {
 FONT_WIDTH = {
     1: ("UltraCondensed", "特窄"),
     2: ("ExtraCondensed", "超窄"),
-    3: ("Condensed", "偏窄"),
+    3: ("Condensed", "窄"),
     4: ("SemiCondensed", "稍窄"),
-    5: ("Medium", "中等"),
+    5: ("", ""),
     6: ("SemiExpanded", "稍宽"),
-    7: ("Expanded", "偏宽"),
+    7: ("Expanded", "宽"),
     8: ("ExtraExpanded", "超宽"),
     9: ("UltraExpanded", "特宽"),
 }
