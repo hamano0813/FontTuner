@@ -2,7 +2,7 @@ import pandas as pd
 from openpyxl.styles import Alignment, Border, Font, NamedStyle, Side
 from openpyxl.worksheet.worksheet import Worksheet
 
-from constants import weight_df, width_df
+from constants import FONT_WEIGHT, FONT_WIDTH
 
 
 def format_sheet(writer: pd.ExcelWriter, name: str, header: NamedStyle, table: NamedStyle):
@@ -32,8 +32,12 @@ def write_excel(metadata_df: pd.DataFrame):
     writer = pd.ExcelWriter("metadata.xlsx", engine="openpyxl")
     header, table = init_style()
     metadata_df.to_excel(writer, sheet_name="metadata", index=False)
+
+    weight_df = pd.DataFrame(FONT_WEIGHT.values(), index=FONT_WEIGHT.keys(), columns=["English", "Chinese"])
+    width_df = pd.DataFrame(FONT_WIDTH.values(), index=FONT_WIDTH.keys(), columns=["English", "Chinese"])
     weight_df.to_excel(writer, sheet_name="weight", index=True)
     width_df.to_excel(writer, sheet_name="width", index=True)
+
     format_sheet(writer, "metadata", header, table)
     format_sheet(writer, "weight", header, table)
     format_sheet(writer, "width", header, table)
