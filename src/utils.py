@@ -6,13 +6,15 @@ from constants import FONT_WEIGHT, FONT_WIDTH
 
 
 def format_sheet(writer: pd.ExcelWriter, name: str, header: NamedStyle, table: NamedStyle):
+    """Format the sheet with the given name."""
     sheet: Worksheet = writer.sheets[name]
     for c_idx, row in enumerate(sheet.iter_rows()):
         for cell in row:
             cell.style = header if not c_idx else table
 
 
-def init_style():
+def init_style() -> tuple[NamedStyle, NamedStyle]:
+    """Initialize the styles for the Excel file."""
     side = Side(border_style="thin", color="000000")
     font = "Sarasa Gothic TC"
 
@@ -29,6 +31,7 @@ def init_style():
 
 
 def write_excel(metadata_df: pd.DataFrame):
+    """Write the metadata to an Excel file."""
     writer = pd.ExcelWriter("metadata.xlsx", engine="openpyxl")
     header, table = init_style()
     metadata_df.to_excel(writer, sheet_name="metadata", index=False)
@@ -42,3 +45,7 @@ def write_excel(metadata_df: pd.DataFrame):
     format_sheet(writer, "weight", header, table)
     format_sheet(writer, "width", header, table)
     writer.close()
+
+
+def read_excel(path: str) -> pd.DataFrame:
+    return pd.read_excel(path, sheet_name="metadata", engine="openpyxl", dtype=str, na_values="", keep_default_na=False)
