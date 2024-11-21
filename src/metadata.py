@@ -92,15 +92,18 @@ def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
     for platformID, platEncID, langID in langIDs:
         p_family = font_setting.get((16, platformID, platEncID, langID), "")
         s_family = font_setting.get((17, platformID, platEncID, langID), "")
-        width_str = FONT_WIDTH.get(width, ("", ""))[0] if width != 5 else ""
-
-        family_str = p_family
-        family_str += f" {width_str}" if width_str else ""
+        if s_family.isascii():
+            width_str = FONT_WIDTH.get(width, ("", ""))[0] if width != 5 else ""
+        else:
+            width_str = FONT_WIDTH.get(width, ("", ""))[1] if width != 5 else ""
         # 1 Font Family
         if weight not in (400, 700):
-            font["name"].setName(f"{family_str} {s_family}", 1, platformID, platEncID, langID)
+            font["name"].setName(f"{p_family} {s_family}", 1, platformID, platEncID, langID)
         else:
-            font["name"].setName(family_str, 1, platformID, platEncID, langID)
+            if width_str:
+                font["name"].setName(f"{p_family} {width_str}", 1, platformID, platEncID, langID)
+            else:
+                font["name"].setName(p_family, 1, platformID, platEncID, langID)
         # 2 Font Subfamily
         if weight != 700:
             font["name"].setName("Regular", 2, platformID, platEncID, langID)
@@ -108,9 +111,9 @@ def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
             font["name"].setName("Bold", 2, platformID, platEncID, langID)
         # 3 Unique ID
         unique_id = font_setting.get((3, platformID, platEncID, langID), "")
-        font["name"].setName(unique_id.format(family_str, s_family, *([""] * 3)), 3, platformID, platEncID, langID)
+        font["name"].setName(unique_id.format(p_family, s_family, *([""] * 3)), 3, platformID, platEncID, langID)
         # 4 Full Name
-        font["name"].setName(f"{family_str} {s_family}", 4, platformID, platEncID, langID)
+        font["name"].setName(f"{p_family} {s_family}", 4, platformID, platEncID, langID)
         # 6 PostScript Name
         for pid, eid, lid in langIDs:
             p_fam = font_setting.get((16, pid, eid, lid), "")
