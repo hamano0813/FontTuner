@@ -115,9 +115,26 @@ def save_metadata(font_setting: dict):
     font = TTFont(font_setting["fontPath"])
     for key, value in font_setting.items():
         if key == "fsSelection":
+            font["head"].macStyle = (font["head"].macStyle & ~(1 << 1)) | ((value & (1 << 0)) << 1)
+            font["head"].macStyle = (font["head"].macStyle & ~(1 << 2)) | ((value & (1 << 1)) << 1)
+            font["head"].macStyle = (font["head"].macStyle & ~(1 << 3)) | (value & (1 << 3))
+            font["head"].macStyle = (font["head"].macStyle & ~(1 << 0)) | ((value & (1 << 5)) >> 5)
+            if value & (1 << 6):
+                value &= ~0b00111111
+                font["head"].macStyle &= ~0b00111111
             font["OS/2"].fsSelection = value
         elif key == "usWeightClass":
             font["OS/2"].usWeightClass = value
+        elif key == "usWidthClass":
+            font["OS/2"].usWidthClass = value
+            if value < 5:
+                font["head"].macStyle |= (1 << 4)
+                font["head"].macStyle &= ~(1 << 5)
+            elif value > 5:
+                font["head"].macStyle |= (1 << 5)
+                font["head"].macStyle &= ~(1 << 4)
+            else:
+                font["head"].macStyle &= ~((1 << 4) | (1 << 5))
 
     langIDs = prepare_metadata(font, font_setting)
     fetch_metadata(font, font_setting, langIDs)
