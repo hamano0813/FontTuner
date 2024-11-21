@@ -9,7 +9,7 @@ from weight import FONT_WEIGHT
 
 def load_metadata(font: TTFont):
     font_setting = {
-        "fsSelection": font["OS/2"].fsSelection,
+        "fsSelection": f"{font["OS/2"].fsSelection:016b}",
         "usWeightClass": font["OS/2"].usWeightClass,
     }
 
@@ -156,7 +156,7 @@ def rename_font(font_setting: dict):
 def save(dfs: list[pd.DataFrame]):
     for metadata_df in dfs:
         metadata_df.fillna("", inplace=True)
-        metadata_df["fsSelection"] = metadata_df["fsSelection"].astype(int)
+        metadata_df["fsSelection"] = metadata_df["fsSelection"].apply(lambda x: int(x, 2))
         metadata_df["usWeightClass"] = metadata_df["usWeightClass"].astype(int)
 
         new_columns = {col: ast.literal_eval(col) if col.startswith("(") else col for col in metadata_df.columns}
