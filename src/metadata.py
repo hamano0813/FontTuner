@@ -4,7 +4,7 @@ import os
 import pandas as pd
 from fontTools.ttLib import TTFont
 
-from constants import FONT_WEIGHT
+from constants import FONT_WEIGHT, FONT_WIDTH
 
 
 def load_metadata(font: TTFont):
@@ -72,10 +72,14 @@ def prepare_metadata(font: TTFont, font_setting: dict):
                 langIDs.add((platformID, platEncID, langID))
                 if not font_setting.get((17, platformID, platEncID, langID), ""):
                     weight = font["OS/2"].usWeightClass
+                    width = font["OS/2"].usWidthClass
                     if p_family.isascii():
-                        font_setting[(17, platformID, platEncID, langID)] = FONT_WEIGHT.get(weight, ("", ""))[0]
+                        sub_str = f"{FONT_WIDTH.get(width, ("", ""))[0]} " if width != 5 else ""
+                        sub_str += FONT_WEIGHT.get(weight, ("", ""))[0]
                     else:
-                        font_setting[(17, platformID, platEncID, langID)] = FONT_WEIGHT.get(weight, ("", ""))[1]
+                        sub_str = f"{FONT_WIDTH.get(width, ("", ""))[1]} " if width != 5 else ""
+                        sub_str += FONT_WEIGHT.get(weight, ("", ""))[1]
+                    font_setting[(17, platformID, platEncID, langID)] = sub_str
 
     langIDs = list(langIDs)
     return langIDs
