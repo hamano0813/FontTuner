@@ -22,10 +22,10 @@ FONT_WIDTH = {
     3: ("Condensed", "窄"),
     4: ("SemiCondensed", "稍窄"),
     5: ("", ""),
-    6: ("SemiExpanded", "稍宽"),
-    7: ("Expanded", "宽"),
-    8: ("ExtraExpanded", "超宽"),
-    9: ("UltraExpanded", "特宽"),
+    6: ("SemiExtended", "稍宽"),
+    7: ("Extended", "宽"),
+    8: ("ExtraExtended", "超宽"),
+    9: ("UltraExtended", "特宽"),
 }
 
 FONT_STYLE = {
