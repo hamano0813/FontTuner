@@ -4,12 +4,13 @@ import os
 import pandas as pd
 from fontTools.ttLib import TTFont
 
-from weight import FONT_WEIGHT
+from constants import FONT_WEIGHT
 
 
 def load_metadata(font: TTFont):
     font_setting = {
         "fsSelection": f"{font["OS/2"].fsSelection:016b}",
+        "usWidthClass": font["OS/2"].usWidthClass,
         "usWeightClass": font["OS/2"].usWeightClass,
     }
 
@@ -50,8 +51,8 @@ def load(font_paths: list[str]):
             metadata.update(load_metadata(font))
             metadatas.append(metadata)
     metadata_df = pd.DataFrame(metadatas)
-    fixed_columns = metadata_df.columns[:3]
-    sorted_columns = metadata_df.columns[3:]
+    fixed_columns = metadata_df.columns[:4]
+    sorted_columns = metadata_df.columns[4:]
     sorted_columns = sorted(sorted_columns, key=lambda x: (x[1], x[2], x[3], x[0]))
     new_columns = list(fixed_columns) + sorted_columns
     return metadata_df[new_columns]
@@ -61,7 +62,7 @@ def prepare_metadata(font: TTFont, font_setting: dict):
     langIDs = set()
 
     for key in font_setting.keys():
-        if key in ("fsSelection", "usWeightClass", "fontPath"):
+        if key in ("fsSelection", "usWidthClass", "usWeightClass", "fontPath"):
             continue
         nameID, platformID, platEncID, langID = key
         if nameID == 16:
@@ -122,7 +123,7 @@ def save_metadata(font_setting: dict):
     fetch_metadata(font, font_setting, langIDs)
 
     for key, value in font_setting.items():
-        if key in ("fsSelection", "usWeightClass", "fontPath"):
+        if key in ("fsSelection", "usWidthClass", "usWeightClass", "fontPath"):
             continue
         nameID, platformID, platEncID, langID = key
         p_family = font_setting.get((16, platformID, platEncID, langID), "")
@@ -157,6 +158,7 @@ def save(dfs: list[pd.DataFrame]):
     for metadata_df in dfs:
         metadata_df.fillna("", inplace=True)
         metadata_df["fsSelection"] = metadata_df["fsSelection"].apply(lambda x: int(x, 2))
+        metadata_df["usWidthClass"] = metadata_df["usWidthClass"].astype(int)
         metadata_df["usWeightClass"] = metadata_df["usWeightClass"].astype(int)
 
         new_columns = {col: ast.literal_eval(col) if col.startswith("(") else col for col in metadata_df.columns}

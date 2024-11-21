@@ -18,5 +18,18 @@ FONT_WEIGHT = {
     950: ("Black", "特黑"),
 }
 
+FONT_WIDTH = {
+    1: ("UltraCondensed", "特窄"),
+    2: ("ExtraCondensed", "超窄"),
+    3: ("Condensed", "窄体"),
+    4: ("SemiCondensed", "半窄"),
+    5: ("Medium", "中等"),
+    6: ("SemiExpanded", "半宽"),
+    7: ("Expanded", "宽体"),
+    8: ("ExtraExpanded", "超宽"),
+    9: ("UltraExpanded", "特宽"),
+}
+
 
 weight_df = pd.DataFrame(FONT_WEIGHT.values(), index=FONT_WEIGHT.keys(), columns=["English", "Chinese"])
+width_df = pd.DataFrame(FONT_WIDTH.values(), index=FONT_WIDTH.keys(), columns=["English", "Chinese"])

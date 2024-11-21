@@ -3,7 +3,7 @@ from openpyxl.styles import Alignment, Border, Font, NamedStyle, Side
 from openpyxl.utils.cell import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from weight import weight_df
+from constants import weight_df, width_df
 
 
 def format_sheet(writer: pd.ExcelWriter, name: str, header: NamedStyle, table: NamedStyle):
@@ -34,6 +34,8 @@ def write_excel(metadata_df: pd.DataFrame):
     header, table = init_style()
     metadata_df.to_excel(writer, sheet_name="metadata", index=False)
     weight_df.to_excel(writer, sheet_name="weight", index=True)
+    width_df.to_excel(writer, sheet_name="width", index=True)
     format_sheet(writer, "metadata", header, table)
     format_sheet(writer, "weight", header, table)
+    format_sheet(writer, "width", header, table)
     writer.close()
