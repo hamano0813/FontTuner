@@ -1,6 +1,5 @@
 import pandas as pd
 from openpyxl.styles import Alignment, Border, Font, NamedStyle, Side
-from openpyxl.utils.cell import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from constants import weight_df, width_df
