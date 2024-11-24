@@ -14,6 +14,7 @@ def load_metadata(font: TTFont):
         "usWeightClass": font["OS/2"].usWeightClass,
         "fsSelection": f"{font["OS/2"].fsSelection:016b}",
         "usWidthClass": font["OS/2"].usWidthClass,
+        "numGlyphs" : font["maxp"].numGlyphs,
     }
     # init the set of langIDs
     langIDs = set()
@@ -60,8 +61,8 @@ def load(font_paths: list[str]):
     # return the metadata as a DataFrame
     metadata_df = pd.DataFrame(metadatas)
     # sort the columns
-    fixed_columns = metadata_df.columns[:4]
-    sorted_columns = metadata_df.columns[4:]
+    fixed_columns = metadata_df.columns[:5]
+    sorted_columns = metadata_df.columns[5:]
     sorted_columns = sorted(sorted_columns, key=lambda x: (x[1], x[2], x[3], x[0]))
     new_columns = list(fixed_columns) + sorted_columns
     # return the sorted DataFrame
@@ -108,7 +109,7 @@ def prepare_metadata(font: TTFont, font_setting: dict):
     # loop through all settings
     for key in font_setting.keys():
         # skip the fixed values
-        if key in ("fsSelection", "usWidthClass", "usWeightClass", "fontPath"):
+        if key in ("fsSelection", "usWidthClass", "usWeightClass", "numGlyphs", "fontPath"):
             continue
         # unpack the key
         _, platformID, platEncID, langID = key
@@ -203,7 +204,7 @@ def save_metadata(font_setting: dict):
     # loop through all settings
     for key, value in font_setting.items():
         # skip the fixed values
-        if key in ("fsSelection", "usWidthClass", "usWeightClass", "fontPath"):
+        if key in ("fsSelection", "usWidthClass", "usWeightClass", "numGlyphs", "fontPath"):
             continue
         # unpack the key
         nameID, platformID, platEncID, langID = key
@@ -238,7 +239,10 @@ def rename_font(font_setting: dict):
         origin_root = os.path.dirname(origin_path)
         origin_ext = os.path.splitext(origin_path)[1]
         new_path = os.path.join(origin_root, new_name + origin_ext)
-        os.rename(origin_path, new_path)
+        try:
+            os.rename(origin_path, new_path)
+        except FileExistsError:
+            print(f"File {new_path} already exists.")
 
 
 def save(metadata_dfs: list[pd.DataFrame]):
@@ -251,6 +255,7 @@ def save(metadata_dfs: list[pd.DataFrame]):
         metadata_df["fsSelection"] = metadata_df["fsSelection"].apply(lambda x: int(x, 2))
         metadata_df["usWidthClass"] = metadata_df["usWidthClass"].astype(int)
         metadata_df["usWeightClass"] = metadata_df["usWeightClass"].astype(int)
+        metadata_df["numGlyphs"] = metadata_df["numGlyphs"].astype(int)
         # convert the columns to tuples
         new_columns = {col: ast.literal_eval(col) if col.startswith("(") else col for col in metadata_df.columns}
         metadata_df.rename(columns=new_columns, inplace=True)
