@@ -212,10 +212,16 @@ def save_metadata(font_setting: dict):
         p_family = font_setting.get((16, platformID, platEncID, langID), "")
         s_family = font_setting.get((17, platformID, platEncID, langID), "")
         # set the normal name when preferred font family and subfamily are not empty
-        if nameID not in (1, 2, 3, 4, 6) and value and p_family and s_family:
-            font["name"].setName(value, nameID, platformID, platEncID, langID)
+        if nameID not in (1, 2, 3, 4, 6) and p_family and s_family:
+            if value:
+                font["name"].setName(value, nameID, platformID, platEncID, langID)
+            else:
+                font["name"].removeNames(nameID, platformID, platEncID, langID)
     # save the font
-    font.save(font_setting["fontPath"])
+    try:
+        font.save(font_setting["fontPath"])
+    except:
+        print(f"Failed to save {font_setting['fontPath']}.")
 
 
 def rename_font(font_setting: dict):
@@ -225,7 +231,7 @@ def rename_font(font_setting: dict):
     # init the new name
     new_name = ""
     # loop through all records in the font
-    for record in font["name"].names:
+    for record in font["name"].names[::-1]:
         # get the full name and version when preferred font subfamily are ASCII
         if record.nameID == 4:
             version = font_setting.get((5, record.platformID, record.platEncID, record.langID), "")
@@ -237,7 +243,7 @@ def rename_font(font_setting: dict):
     if new_name and not os.path.exists(new_name):
         origin_path = font_setting["fontPath"]
         origin_root = os.path.dirname(origin_path)
-        origin_ext = os.path.splitext(origin_path)[1]
+        origin_ext = os.path.splitext(origin_path)[1].lower()
         new_path = os.path.join(origin_root, new_name + origin_ext)
         try:
             os.rename(origin_path, new_path)
