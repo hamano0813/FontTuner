@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 from openpyxl.styles import Alignment, Border, Font, NamedStyle, Side
 from openpyxl.worksheet.worksheet import Worksheet
@@ -32,8 +33,17 @@ def init_style() -> tuple[NamedStyle, NamedStyle]:
 
 def write_excel(metadata_df: pd.DataFrame):
     """Write the metadata to an Excel file."""
+    illegal_characters_re = re.compile(r'[\x00-\x1F]')
+    def clean_illegal_characters(value):
+        if isinstance(value, str):  # 仅对字符串进行清理
+            return illegal_characters_re.sub("", value)
+        return value
+    metadata_df = metadata_df.map(clean_illegal_characters)   
+
     writer = pd.ExcelWriter("metadata.xlsx", engine="openpyxl")
     header, table = init_style()
+
+
     metadata_df.to_excel(writer, sheet_name="metadata", index=False)
 
     weight_df = pd.DataFrame(FONT_WEIGHT.values(), index=FONT_WEIGHT.keys(), columns=["English", "Chinese"])
