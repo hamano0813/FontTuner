@@ -17,7 +17,7 @@ def format_sheet(writer: pd.ExcelWriter, name: str, header: NamedStyle, table: N
 def init_style() -> tuple[NamedStyle, NamedStyle]:
     """Initialize the styles for the Excel file."""
     side = Side(border_style="thin", color="000000")
-    font = "Sarasa Gothic TC"
+    font = "Microsoft YaHei UI"
 
     header = NamedStyle("标题样式")
     header.font = Font(name=font, bold=True, size=9)
@@ -46,8 +46,8 @@ def write_excel(metadata_df: pd.DataFrame):
 
     metadata_df.to_excel(writer, sheet_name="metadata", index=False)
 
-    weight_df = pd.DataFrame(FONT_WEIGHT.values(), index=FONT_WEIGHT.keys(), columns=["English", "Chinese"])
-    width_df = pd.DataFrame(FONT_WIDTH.values(), index=FONT_WIDTH.keys(), columns=["English", "Chinese"])
+    weight_df = pd.DataFrame(FONT_WEIGHT.values(), index=FONT_WEIGHT.keys(), columns=["English", "SC", "TC"])
+    width_df = pd.DataFrame(FONT_WIDTH.values(), index=FONT_WIDTH.keys(), columns=["English", "SC", "TC"])
     weight_df.to_excel(writer, sheet_name="weight", index=True)
     width_df.to_excel(writer, sheet_name="width", index=True)
 
