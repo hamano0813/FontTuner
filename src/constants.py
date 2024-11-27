@@ -1,50 +1,32 @@
 FONT_WEIGHT = {
-    150: ("Hairline", "特丝"),
-    200: ("Thin", "特纤"),
-    250: ("UltraLight", "特细"),
-    275: ("ExtraLight", "超细"),
-    300: ("Light", "细体"),
-    350: ("SemiLight", "稍细"),
-    400: ("Regular", "正常"),
-    500: ("Medium", "中等"),
-    550: ("DemiBold", "微粗"),
-    600: ("SemiBold", "稍粗"),
-    700: ("Bold", "粗体"),
-    800: ("ExtraBold", "超粗"),
-    850: ("UltraBold", "特粗"),
-    900: ("Heavy", "特浓"),
-    950: ("Black", "特黑"),
-}
-
-HY_WEIGHT = {
-    50: ("Feather", "羽", "羽"),  # 25
-    100: ("Hairline", "丝", "絲"),  # 30
-    200: ("Thin", "纤", "纖"),  # 35
-    250: ("Slim", "细", "細"),  # 40
-    300: ("Light", "轻", "輕"),  # 45
-    350: ("Book", "书", "書"),  # 50
-    400: ("Regular", "准", "準"),  # 55
-    500: ("Medium", "中", "中"),  # 60
-    550: ("Semi", "次", "次"),  # 65
-    600: ("Demi", "半", "半"),  # 70
-    700: ("Bold", "粗", "粗"),  # 75
-    750: ("Heavy", "重", "重"),  # 80
-    800: ("Dense", "厚", "厚"),  # 85
-    850: ("Extra", "极", "極"),  # 90
-    900: ("Ultra", "超", "超"),  # 95
-    950: ("Black", "黑", "黑"),  # 105
+    100: ("UltraLight", "极细", "極細"),
+    150: ("ExtraLight", "特细", "特細"),
+    200: ("Thin", "纤细", "纖細"),
+    300: ("Light", "细体", "細體"),
+    325: ("SemiLight", "准细", "準細"),
+    350: ("DemiLight", "半细", "半細"),
+    375: ("Book", "标准", "标准"),
+    400: ("Regular", "常规", "常規"),
+    500: ("Medium", "中等", "中等"),
+    600: ("DemiBold", "半粗", "半粗"),
+    650: ("SemiBold", "准粗", "準粗"),
+    700: ("Bold", "粗体", "粗體"),
+    800: ("ExtraBold", "特粗", "特粗"),
+    850: ("Heavy", "重粗", "重粗"),
+    900: ("Black", "粗黑", "粗黑"),
+    950: ("UltraBlack", "极黑", "極黑"),
 }
 
 FONT_WIDTH = {
-    1: ("UltraCondensed", "特窄"),
-    2: ("ExtraCondensed", "超窄"),
-    3: ("Condensed", "窄"),
-    4: ("SemiCondensed", "稍窄"),
+    1: ("UltraCondensed", "极窄"，"極窄"),
+    2: ("ExtraCondensed", "特窄", "特窄"),
+    3: ("Condensed", "窄", "窄"),
+    4: ("SemiCondensed", "半窄", "半窄"),
     5: ("", ""),
-    6: ("SemiExtended", "稍宽"),
-    7: ("Extended", "宽"),
-    8: ("ExtraExtended", "超宽"),
-    9: ("UltraExtended", "特宽"),
+    6: ("SemiExtended", "半宽", "半宽"),
+    7: ("Extended", "宽", "宽"),
+    8: ("ExtraExtended", "特宽", "特宽"),
+    9: ("UltraExtended", "极宽", "极宽"),
 }
 
 FONT_STYLE = {
