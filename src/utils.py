@@ -31,6 +31,24 @@ def init_style() -> tuple[NamedStyle, NamedStyle]:
     return header, table
 
 
+def translate_mapping(lang_id: int):
+    match lang_id:
+        case 0x0404:  # Traditional Chinese
+            return 2
+        case 0x0804:  # Simplified Chinese
+            return 1
+        case 0x0C04:  # Hong Kong SAR
+            return 2
+        case 0x1004:  # Singapore
+            return 1
+        case 0x1404:  # Macau SAR
+            return 2
+        case 0x7C04:  # PRC
+            return 1
+        case _:  # English
+            return 0
+
+
 def write_excel(metadata_df: pd.DataFrame):
     """Write the metadata to an Excel file."""
     illegal_characters_re = re.compile(r"[\x00-\x1F]")
