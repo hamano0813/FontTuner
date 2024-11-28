@@ -4,6 +4,7 @@ import os
 import pandas as pd
 from fontTools.ttLib import TTFont
 
+import utils
 from constants import FONT_STYLE, FONT_WEIGHT, FONT_WIDTH
 
 
@@ -128,10 +129,10 @@ def prepare_metadata(font: TTFont, font_setting: dict):
             width = font["OS/2"].usWidthClass
             italic = font["OS/2"].fsSelection & 1 << 0
             # get the font style strings
-            notascii = not p_family.isascii()
-            weight_str = FONT_WEIGHT.get(weight, ("", ""))[notascii]
-            width_str = FONT_WIDTH.get(width, ("", ""))[notascii]
-            italic_str = FONT_STYLE.get(italic, ("", ""))[notascii]
+            font_switch = utils.translate_mapping(langID)
+            weight_str = FONT_WEIGHT.get(weight, ("", "", ""))[font_switch]
+            width_str = FONT_WIDTH.get(width, ("", "", ""))[font_switch]
+            italic_str = FONT_STYLE.get(italic, ("", "", ""))[font_switch]
             # create the font family string if it is empty
             if not font_setting.get((17, platformID, platEncID, langID)).strip():
                 s_family = f"{weight_str} {width_str} {italic_str}".strip().replace("  ", " ")
@@ -152,9 +153,9 @@ def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
         p_family = font_setting.get((16, platformID, platEncID, langID), "")
         s_family = font_setting.get((17, platformID, platEncID, langID), "")
         # get the font style strings
-        notascii = not p_family.isascii()
-        weight_str = FONT_WEIGHT.get(weight, ("", ""))[notascii]
-        width_str = FONT_WIDTH.get(width, ("", ""))[notascii]
+        font_switch = utils.translate_mapping(langID)
+        weight_str = FONT_WEIGHT.get(weight, ("", "", ""))[font_switch]
+        width_str = FONT_WIDTH.get(width, ("", "", ""))[font_switch]
 
         # 1 Font Family
         font_family = [p_family]
@@ -234,11 +235,18 @@ def rename_font(font_setting: dict):
     for record in font["name"].names[::-1]:
         # get the full name and version when preferred font subfamily are ASCII
         if record.nameID == 4:
-            version = font_setting.get((5, record.platformID, record.platEncID, record.langID), "")
-            new_name = " ".join([record.toUnicode(), version])
-            s_family = font_setting.get((17, record.platformID, record.platEncID, record.langID), "")
-            if not s_family.isascii():
+            font_switch = utils.translate_mapping(record.langID)
+            if font_switch == 1:
+                version = font_setting.get((5, record.platformID, record.platEncID, record.langID), "")
+                new_name = " ".join([record.toUnicode(), version])
                 break
+            elif font_switch == 2 and not new_name:
+                version = font_setting.get((5, record.platformID, record.platEncID, record.langID), "")
+                new_name = " ".join([record.toUnicode(), version])
+            else:
+                version = font_setting.get((5, record.platformID, record.platEncID, record.langID), "")
+                new_name = " ".join([record.toUnicode(), version])
+            
     # rename the font file
     if new_name and not os.path.exists(new_name):
         origin_path = font_setting["fontPath"]
