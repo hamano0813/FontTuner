@@ -221,32 +221,38 @@ def save_metadata(font_setting: dict):
     # save the font
     try:
         font.save(font_setting["fontPath"])
-    except:
-        print(f"Failed to save {font_setting['fontPath']}.")
+        return True
+    except PermissionError as e:
+        print(f"Failed to save {font_setting['fontPath']}. Permission denied.")
+        return False
 
 
 def rename_font(font_setting: dict):
     """Rename the font file based on the metadata."""
     # load the font
     font = TTFont(font_setting["fontPath"])
-    # init the new name
-    new_name = ""
+    # init the font family and subfamily and version strings
+    font_str = ""
+    sub_str = ""
+    ver_str = ""
     # loop through all records in the font
-    for record in font["name"].names[::-1]:
-        # get the full name and version when preferred font subfamily are ASCII
-        if record.nameID == 4:
-            font_switch = utils.translate_mapping(record.langID)
+    for record in font["name"].names:
+        font_switch = utils.translate_mapping(record.langID)
+        if record.nameID == 16:
             if font_switch == 1:
-                version = font_setting.get((5, record.platformID, record.platEncID, record.langID), "")
-                new_name = " ".join([record.toUnicode(), version])
-                break
-            elif font_switch == 2 and not new_name:
-                version = font_setting.get((5, record.platformID, record.platEncID, record.langID), "")
-                new_name = " ".join([record.toUnicode(), version])
+                font_str = record.toUnicode()
+            elif font_switch == 2 or font_str.isascii():
+                font_str = record.toUnicode()
             else:
-                version = font_setting.get((5, record.platformID, record.platEncID, record.langID), "")
-                new_name = " ".join([record.toUnicode(), version])
-            
+                font_str = record.toUnicode()
+    for record in font["name"].names:
+        if record.nameID == 17:
+            sub_name = record.toUnicode()
+            if sub_name and sub_name.isascii():
+                sub_str = sub_name
+                ver_str = font_setting.get((5, record.platformID, record.platEncID, record.langID), "")
+                break
+    new_name = f"{font_str} {sub_str} {ver_str}".strip()
     # rename the font file
     if new_name and not os.path.exists(new_name):
         origin_path = font_setting["fontPath"]
@@ -276,6 +282,7 @@ def save(metadata_dfs: list[pd.DataFrame]):
         # loop through all font settings
         for _, font_setting in metadata_df.iterrows():
             # save the metadata
-            save_metadata(font_setting)
+            result = save_metadata(font_setting)
             # rename the font file
-            rename_font(font_setting)
+            if result:
+                rename_font(font_setting)
