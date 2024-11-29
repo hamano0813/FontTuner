@@ -22,7 +22,7 @@ FONT_WIDTH = {
     2: ("ExtraCondensed", "特窄", "特窄"),
     3: ("Condensed", "窄", "窄"),
     4: ("SemiCondensed", "半窄", "半窄"),
-    5: ("Normal", "正常", "正常"),
+    5: ("", "", ""),
     6: ("SemiExtended", "半宽", "半宽"),
     7: ("Extended", "宽", "宽"),
     8: ("ExtraExtended", "特宽", "特宽"),
