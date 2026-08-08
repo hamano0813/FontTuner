@@ -47,6 +47,18 @@ class FontTableModel(QAbstractTableModel):
     def get_entries(self) -> list[FontEntry]:
         return self._entries
 
+    def remove_rows(self, rows: list[int]) -> int:
+        """从表格移除指定行（仅界面移除，不删文件，不再编辑）。返回移除行数。"""
+        rows = sorted({r for r in rows if 0 <= r < len(self._entries)})
+        if not rows:
+            return 0
+        self.beginResetModel()
+        for i in reversed(rows):
+            del self._entries[i]
+        self.endResetModel()
+        app_signals.project_edited.emit()
+        return len(rows)
+
     @property
     def columns(self) -> list[ColumnDef]:
         return self._columns

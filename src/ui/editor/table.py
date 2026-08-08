@@ -1,9 +1,9 @@
 """字体表格视图：qfw TableView + 复制粘贴删除 + 语言列显隐。"""
 
 from PySide6.QtCore import QModelIndex, Qt
-from PySide6.QtGui import QKeyEvent, QKeySequence
+from PySide6.QtGui import QContextMenuEvent, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import QTableView
-from qfluentwidgets import TableView, setCustomStyleSheet
+from qfluentwidgets import Action, FluentIcon as FIF, RoundMenu, TableView, setCustomStyleSheet
 from qfluentwidgets.common.smooth_scroll import SmoothMode
 
 from core.models import EDITABLE_NAME_IDS, LANGS
@@ -70,6 +70,28 @@ class FontTableView(TableView):
         if indexes:
             self._model.delete_selection(set(indexes))
 
+    # ---------------------------------------------------------------- 右键菜单
+
+    def contextMenuEvent(self, e: QContextMenuEvent):
+        menu = RoundMenu(self)
+        del_action = Action(FIF.DELETE, "删除选中字体")
+        del_action.triggered.connect(self._remove_selected_rows)
+        menu.addAction(del_action)
+        menu.exec(e.globalPos())
+        e.accept()
+
+    def _remove_selected_rows(self):
+        """从界面移除选中的整行字体（不删文件，仅不再编辑）。"""
+        selection = self.selectionModel()
+        rows = sorted({i.row() for i in selection.selectedIndexes()})
+        if not rows:
+            return
+        removed = self._model.remove_rows(rows)
+        if removed and self._model.rowCount() > 0:
+            col = self.currentIndex().column() if self.currentIndex().isValid() else 0
+            row = min(rows[0], self._model.rowCount() - 1)
+            self.setCurrentIndex(self._model.index(row, col))
+
     # ---------------------------------------------------------------- 显隐
 
     def set_language_visible(self, lang: str, visible: bool) -> None:
@@ -82,11 +104,15 @@ class FontTableView(TableView):
 
     def _refresh_column_visibility(self) -> None:
         for i, col in enumerate(self._model.columns):
-            if col.key[0] == "lang":
-                lang, nid = col.key[1], col.key[2]
+            kind = col.key[0]
+            if kind in ("lang", "temp", "charset"):
+                lang = col.key[1]
+                # 字体名/字符集是常驻工作列：仅随语言开关折叠，不受「全部字段」影响
                 hidden = not self._lang_visible[lang]
-                if nid not in EDITABLE_NAME_IDS and not self._show_extra:
-                    hidden = True
+                if kind == "lang":
+                    nid = col.key[2]
+                    if nid not in EDITABLE_NAME_IDS and not self._show_extra:
+                        hidden = True
                 self.setColumnHidden(i, hidden)
 
     # ---------------------------------------------------------------- 样式

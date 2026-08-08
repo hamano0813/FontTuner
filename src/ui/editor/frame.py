@@ -42,6 +42,7 @@ class EditorFrame(QFrame):
         self._setup_delegates()
 
         self._worker = None  # 当前后台线程引用
+        self._append_import = False  # 本次导入是否追加到现有表格（而非替换）
 
         self._build_toolbar()
         self._build_layout()
@@ -64,11 +65,15 @@ class EditorFrame(QFrame):
             btn.toggled.connect(lambda checked, l=lang: self.table.set_language_visible(l, checked))
             self.lang_toggles[lang] = btn
 
-        self.switch_extra = SwitchButton("全部字段", self)
-        self.switch_extra.checkedChanged.connect(self.table.set_extra_fields_visible)
-        self.switch_preview = SwitchButton("预览", self)
+        self.switch_extra = SwitchButton("全部字段 关", self)
+        self.switch_extra.setOnText("全部字段 开")
+        self.switch_extra.setOffText("全部字段 关")
+        self.switch_extra.checkedChanged.connect(self._on_switch_extra_changed)
+        self.switch_preview = SwitchButton("字体预览 关", self)
+        self.switch_preview.setOnText("字体预览 开")
+        self.switch_preview.setOffText("字体预览 关")
         self.switch_preview.setChecked(True)
-        self.switch_preview.checkedChanged.connect(lambda on: self.preview.setVisible(on))
+        self.switch_preview.checkedChanged.connect(self._on_switch_preview_changed)
 
         self.btn_import.clicked.connect(self._show_import_menu)
         self.btn_save.clicked.connect(self._on_save)
@@ -111,6 +116,12 @@ class EditorFrame(QFrame):
         label = CaptionLabel("尚未导入字体", self)
         return label
 
+    def _on_switch_extra_changed(self, on: bool) -> None:
+        self.table.set_extra_fields_visible(on)
+
+    def _on_switch_preview_changed(self, on: bool) -> None:
+        self.preview.setVisible(on)
+
     def _setup_delegates(self):
         for i, col in enumerate(self.model.columns):
             kind = col.kind
@@ -129,10 +140,14 @@ class EditorFrame(QFrame):
 
     # ---------------------------------------------------------------- 导入
 
-    def import_paths(self, paths: list[str]):
-        """外部（拖拽/命令行）传入的字体或文件夹。"""
+    def import_paths(self, paths: list[str], append: bool = False):
+        """外部（拖拽/命令行）传入的字体或文件夹。
+
+        append=True 时新字体追加到表格现有内容之后（不清空），否则整体替换。
+        """
         if not paths:
             return
+        self._append_import = append
         self._start_worker(LoadWorker(list(paths), self), self._on_load_finished)
 
     def _show_import_menu(self):
@@ -143,26 +158,61 @@ class EditorFrame(QFrame):
         folder_action.triggered.connect(self._on_import_folder)
         menu.addAction(files_action)
         menu.addAction(folder_action)
+        menu.addSeparator()
+        append_files_action = Action(FIF.DOCUMENT, "追加文件…")
+        append_files_action.triggered.connect(self._on_append_files)
+        append_folder_action = Action(FIF.FOLDER, "追加文件夹…")
+        append_folder_action.triggered.connect(self._on_append_folder)
+        menu.addAction(append_files_action)
+        menu.addAction(append_folder_action)
         menu.exec(self.btn_import.mapToGlobal(self.btn_import.rect().bottomLeft()))
 
-    def _on_import_files(self):
+    def _pick_files(self) -> list[str]:
         files, _ = QFileDialog.getOpenFileNames(
             self, "选择字体文件", option.import_dir.value,
             "字体文件 (*.ttf *.otf *.ttc *.otc)",
         )
         if files:
             qconfig.set(option.import_dir, os.path.dirname(files[0]))
-            self.import_paths(files)
+        return files
 
-    def _on_import_folder(self):
+    def _pick_folder(self) -> list[str]:
         folder = QFileDialog.getExistingDirectory(self, "选择字体文件夹", option.import_dir.value)
         if folder:
             qconfig.set(option.import_dir, folder)
-            self.import_paths([folder])
+            return [folder]
+        return []
+
+    def _on_import_files(self):
+        files = self._pick_files()
+        if files:
+            self.import_paths(files)
+
+    def _on_import_folder(self):
+        paths = self._pick_folder()
+        if paths:
+            self.import_paths(paths)
+
+    def _on_append_files(self):
+        files = self._pick_files()
+        if files:
+            self.import_paths(files, append=True)
+
+    def _on_append_folder(self):
+        paths = self._pick_folder()
+        if paths:
+            self.import_paths(paths, append=True)
 
     def _on_load_finished(self, entries, errors):
+        if self._append_import:
+            current = self.model.get_entries()
+            new_count = len(entries)
+            entries = current + entries  # 追加到现有内容之后
+            self.status_label.setText(f"已追加 {new_count} 个字体，共 {len(entries)} 个")
+        else:
+            self.status_label.setText(f"已加载 {len(entries)} 个字体")
+        self._append_import = False
         self.model.set_entries(entries)
-        self.status_label.setText(f"已加载 {len(entries)} 个字体")
         app_signals.fonts_loaded.emit()
         if errors:
             InfoBar.error("部分文件加载失败", f"{len(errors)} 个文件出错：{errors[0][0]}",
@@ -246,6 +296,14 @@ class EditorFrame(QFrame):
     def _selected_rows(self) -> list[int]:
         selection = self.table.selectionModel()
         return sorted({i.row() for i in selection.selectedIndexes()})
+
+    # ---------------------------------------------------------------- 主题
+
+    def reset_style(self):
+        """主题切换后刷新表格自定义样式与下拉编辑器配色。"""
+        self.table._init_style()
+        self._setup_delegates()          # 重建委托（CellComboBox 构造时按 isDarkTheme 上色）
+        self.table.viewport().update()   # 强制重绘（chip/文字颜色在绘制时取 isDarkTheme）
 
     # ---------------------------------------------------------------- 预览
 

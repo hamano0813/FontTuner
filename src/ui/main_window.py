@@ -38,6 +38,10 @@ class MainWindow(MSFluentWindow):
     def _clear_dirty(self):
         self._dirty = False
 
+    def reset_style(self):
+        """主题切换后刷新所有控件的自定义样式。"""
+        self.editor_frame.reset_style()
+
     def closeEvent(self, e: QCloseEvent):
         if self._dirty:
             box = MessageBox("未保存的修改", "有修改尚未保存，确定退出吗？", self)

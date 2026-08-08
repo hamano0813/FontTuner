@@ -30,7 +30,17 @@ def load_templates(path: str | None = None) -> list[VendorTemplate]:
             data = json.load(f)
     except (OSError, ValueError):
         return []
-    return [VendorTemplate(**item) for item in data]
+    templates = []
+    for item in data:
+        # JSON 对象键恒为字符串，nameID 键需还原为 int，否则编辑回填/应用写入都查不到
+        field_values = {
+            lang: {int(nid): text for nid, text in values.items()}
+            for lang, values in item.get("field_values", {}).items()
+        }
+        item = dict(item)
+        item["field_values"] = field_values
+        templates.append(VendorTemplate(**item))
+    return templates
 
 
 def save_templates(templates: list[VendorTemplate], path: str | None = None) -> None:

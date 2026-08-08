@@ -2,8 +2,8 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontDatabase
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, SubtitleLabel
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from qfluentwidgets import BodyLabel, LineEdit, SubtitleLabel
 
 from core.models import FontEntry
 
@@ -18,7 +18,8 @@ class FontPreviewWidget(QWidget):
         self._family_cache: dict[str, str | None] = {}
 
         self.title = SubtitleLabel("—", self)
-        self.sample_input = QLineEdit(DEFAULT_SAMPLE, self)
+        self.sample_input = LineEdit(self)
+        self.sample_input.setText(DEFAULT_SAMPLE)
         self.sample_input.setClearButtonEnabled(True)
         self.preview_label = QLabel(self)
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)

@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
-    QListWidget,
     QListWidgetItem,
     QStackedWidget,
     QVBoxLayout,
@@ -19,12 +18,12 @@ from qfluentwidgets import (
     CaptionLabel,
     FluentIcon as FIF,
     LineEdit,
+    ListWidget,
     MessageBoxBase,
     PrimaryPushButton,
     PushButton,
     SegmentedWidget,
     SubtitleLabel,
-    isDarkTheme,
 )
 
 from core.models import LANG_LABELS, LANGS
@@ -137,7 +136,7 @@ class TemplateFrame(QFrame):
         self.title = SubtitleLabel("厂商模板", self)
         self.hint = BodyLabel("维护厂商字段集，在「字体编辑」页一键应用到选中/全部字体。", self)
 
-        self.list = QListWidget(self)
+        self.list = ListWidget(self)
         self.list.itemSelectionChanged.connect(self._update_buttons)
 
         self.btn_new = PushButton(FIF.ADD, "新建", self)
@@ -166,7 +165,6 @@ class TemplateFrame(QFrame):
 
         self._refresh()
         self._update_buttons()
-        self._apply_theme()
 
     def _refresh(self) -> None:
         self.list.clear()
@@ -218,13 +216,3 @@ class TemplateFrame(QFrame):
     def _persist(self):
         save_templates(self._templates)
         self._refresh()
-
-    def _apply_theme(self):
-        color = "#1e1e1e" if isDarkTheme() else "#f0f0f0"
-        text = "#ffffff" if isDarkTheme() else "#1a1a1a"
-        self.list.setStyleSheet(
-            f"QListWidget {{ background: {color}; border-radius: 8px; border: none; "
-            f"color: {text}; padding: 4px; }}"
-            "QListWidget::item { height: 36px; padding-left: 10px; border-radius: 5px; }"
-            "QListWidget::item:selected { background: rgba(0, 120, 212, 0.7); }"
-        )

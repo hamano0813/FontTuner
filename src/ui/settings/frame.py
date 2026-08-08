@@ -25,7 +25,9 @@ class SettingsFrame(QFrame):
             option.themeMode, FIF.PALETTE, "主题模式", "更改界面显示颜色",
             texts=["浅色", "深色", "跟随系统设置"],
         )
-        option.themeMode.valueChanged.connect(self._on_theme_changed)
+        # 用 QConfig 的 themeChanged（在 qconfig.theme 解析完成后触发），
+        # 而非 themeMode.valueChanged（在解析前触发，setTheme 会读到旧主题）
+        option.themeChanged.connect(self.theme_changed)
 
         # ===== 关于 =====
         self.about_card = SettingCard(
@@ -62,5 +64,7 @@ class SettingsFrame(QFrame):
             group.addSettingCard(widget)
         return group
 
-    def _on_theme_changed(self, theme: Theme) -> None:
+    def theme_changed(self, theme: Theme) -> None:
+        """主题切换：应用主题并刷新所有控件的自定义样式（VAS 模式）。"""
         setTheme(theme)
+        self.window().reset_style()
