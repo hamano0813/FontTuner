@@ -6,6 +6,7 @@ from ui.editor.frame import EditorFrame
 from ui.settings.frame import SettingsFrame
 from ui.signals import app_signals
 from ui.templates.frame import TemplateFrame
+from ui.translations.frame import TranslationFrame
 
 
 class MainWindow(MSFluentWindow):
@@ -17,10 +18,13 @@ class MainWindow(MSFluentWindow):
 
         self.editor_frame = EditorFrame(self)
         self.template_frame = TemplateFrame(self)
+        self.translation_frame = TranslationFrame(self)
         self.settings_frame = SettingsFrame(self)
 
         self.addSubInterface(self.editor_frame, FIF.EDIT, "字体编辑")
         self.addSubInterface(self.template_frame, FIF.BRUSH, "厂商模板")
+        self.addSubInterface(self.translation_frame, FIF.FONT, "翻译",
+                             position=NavigationItemPosition.BOTTOM)
         self.addSubInterface(self.settings_frame, FIF.SETTING, "设置",
                              position=NavigationItemPosition.BOTTOM)
 

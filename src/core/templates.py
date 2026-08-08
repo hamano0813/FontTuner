@@ -83,18 +83,6 @@ class _SafeDict(dict):
         return "{" + key + "}"  # 未识别的占位符原样保留
 
 
-_LABEL_INDEX = {"EN": 0, "SC": 1, "TC": 2, "JA": 0}  # 日文回落英文标签
-
-
-def _label(tuples: dict, value, lang: str, fallback: str) -> str:
-    t = tuples.get(value)
-    if t:
-        label = t[_LABEL_INDEX[lang]] or t[0]
-        if label:
-            return label
-    return fallback
-
-
 def format_name(text: str, entry: FontEntry, lang: str) -> str:
     """把含 {weight}/{width}/{italic} 等占位符的模板文本按字体动态生成。"""
     if "{" not in text:
@@ -106,19 +94,12 @@ def format_name(text: str, entry: FontEntry, lang: str) -> str:
 
 
 def _format_vars(entry: FontEntry, lang: str) -> dict[str, object]:
-    from core.constants import FONT_WEIGHT, FONT_WIDTH
+    from core.translations import italic_label, weight_label, width_label
 
-    weight = _label(FONT_WEIGHT, entry.us_weight_class, lang, "Regular")
-    width = _label(FONT_WIDTH, entry.us_width_class, lang, "Normal")
-    if entry.us_width_class == 5:
-        width = "正常" if lang in ("SC", "TC") else "Normal"
-    italic = "斜体" if entry.italic() else "正常"
-    if lang in ("EN", "JA"):
-        italic = "Italic" if entry.italic() else "Regular"
     return {
-        "weight": weight,
-        "width": width,
-        "italic": italic,
+        "weight": weight_label(entry.us_weight_class, lang),
+        "width": width_label(entry.us_width_class, lang),
+        "italic": italic_label(entry.italic(), lang),
         "weight_num": entry.us_weight_class,
         "width_num": entry.us_width_class,
     }

@@ -4,26 +4,7 @@ from __future__ import annotations
 
 from fontTools.ttLib import TTFont
 
-from core.constants import FONT_STYLE, FONT_WEIGHT, FONT_WIDTH
-
-
-def translate_mapping(lang_id: int):
-    """Windows 语言 ID → FONT_WEIGHT/FONT_WIDTH/FONT_STYLE 元组的语言下标（英/简/繁）。"""
-    match lang_id:
-        case 0x0404:  # Traditional Chinese
-            return 2
-        case 0x0804:  # Simplified Chinese
-            return 1
-        case 0x0C04:  # Hong Kong SAR
-            return 2
-        case 0x1004:  # Singapore
-            return 1
-        case 0x1404:  # Macau SAR
-            return 2
-        case 0x7C04:  # PRC
-            return 1
-        case _:  # English
-            return 0
+from core import translations
 
 
 def load_metadata(font: TTFont):
@@ -122,11 +103,11 @@ def prepare_metadata(font: TTFont, font_setting: dict):
             weight = font["OS/2"].usWeightClass
             width = font["OS/2"].usWidthClass
             italic = font["OS/2"].fsSelection & 1 << 0
-            # get the font style strings
-            font_switch = translate_mapping(langID)
-            weight_str = FONT_WEIGHT.get(weight, ("", "", ""))[font_switch]
-            width_str = FONT_WIDTH.get(width, ("", "", ""))[font_switch]
-            italic_str = FONT_STYLE.get(italic, ("", "", ""))[font_switch]
+            # get the font style strings（宽度 5=正常，不产生宽度词）
+            lang = translations.lang_of(langID)
+            weight_str = translations.weight_label(weight, lang)
+            width_str = "" if width == 5 else translations.width_label(width, lang)
+            italic_str = translations.italic_label(italic, lang)
             # create the font family string if it is empty
             if not font_setting.get((17, platformID, platEncID, langID)).strip():
                 s_family = f"{weight_str} {width_str} {italic_str}".strip().replace("  ", " ")
@@ -146,10 +127,10 @@ def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
         # get the preferred font family and subfamily
         p_family = font_setting.get((16, platformID, platEncID, langID), "")
         s_family = font_setting.get((17, platformID, platEncID, langID), "")
-        # get the font style strings
-        font_switch = translate_mapping(langID)
-        weight_str = FONT_WEIGHT.get(weight, ("", "", ""))[font_switch]
-        width_str = FONT_WIDTH.get(width, ("", "", ""))[font_switch]
+        # get the font style strings（宽度 5=正常，不产生宽度词）
+        lang = translations.lang_of(langID)
+        weight_str = translations.weight_label(weight, lang)
+        width_str = "" if width == 5 else translations.width_label(width, lang)
 
         # 1 Font Family
         font_family = [p_family]

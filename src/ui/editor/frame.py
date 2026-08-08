@@ -15,6 +15,7 @@ from qfluentwidgets import (
     RoundMenu,
     SwitchButton,
     ToggleButton,
+    qconfig,
 )
 
 from config import option
@@ -149,13 +150,13 @@ class EditorFrame(QFrame):
             "字体文件 (*.ttf *.otf *.ttc *.otc)",
         )
         if files:
-            option.import_dir.setValue(os.path.dirname(files[0]))
+            qconfig.set(option.import_dir, os.path.dirname(files[0]))
             self.import_paths(files)
 
     def _on_import_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "选择字体文件夹", option.import_dir.value)
         if folder:
-            option.import_dir.setValue(folder)
+            qconfig.set(option.import_dir, folder)
             self.import_paths([folder])
 
     def _on_load_finished(self, entries, errors):
@@ -286,3 +287,8 @@ class EditorFrame(QFrame):
 
     def get_entries(self):
         return self.model.get_entries()
+
+    def refresh_after_translations(self):
+        """字重/字宽翻译修改后：重建下拉委托并刷新表格显示。"""
+        self._setup_delegates()
+        self.model.set_entries(self.model.get_entries())

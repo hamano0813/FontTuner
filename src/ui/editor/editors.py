@@ -4,8 +4,8 @@ from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import QComboBox, QLineEdit, QWidget
-from qfluentwidgets import isDarkTheme
+from PySide6.QtWidgets import QComboBox, QLineEdit, QSizePolicy, QWidget
+from qfluentwidgets import ScrollBar, isDarkTheme
 
 
 class CellEditor(QWidget):
@@ -82,7 +82,7 @@ class CellLineEdit(QLineEdit, CellEditor):
 
 
 class CellComboEditor(QComboBox, CellEditor):
-    """下拉/可输入单元格编辑器。
+    """下拉/可输入单元格编辑器（VAS 主题化：透明背景 + 圆角下拉 + qfw ScrollBar）。
 
     set_items 传入 [(value, label)]；选中项返回其 value，自由输入返回文本。
     """
@@ -92,13 +92,93 @@ class CellComboEditor(QComboBox, CellEditor):
         CellEditor.__init__(self, parent)
         self.setEditable(True)
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.setStyleSheet("background: transparent; padding-left: 8px; padding-right: 6px;")
-        # 下拉列表保持实底，避免透明背景透出窗口
-        dark = isDarkTheme()
-        self.view().setStyleSheet(
-            f"QAbstractItemView {{ background: {'#1f1f1f' if dark else '#ffffff'}; "
-            f"color: {'#ffffff' if dark else '#1a1a1a'}; outline: none; }}"
-        )
+        self.setCompleter(None)
+        self.setMaxVisibleItems(10)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFrame(False)
+        self._apply_theme()
+        self._view_styled = False
+
+    # ========== VAS 主题化 QSS ==========
+
+    def _apply_theme(self) -> None:
+        if isDarkTheme():
+            qss = (
+                "QComboBox { border: none; border-radius: 0px; background: transparent; "
+                "color: white; outline: none; }"
+                "QComboBox:hover { border: none; background: transparent; }"
+                "QComboBox:focus { border: none; background: transparent; }"
+                "QComboBox::drop-down { width: 20px; border: none; background: transparent; }"
+                "QComboBox::down-arrow {"
+                "  image: url(:/qfluentwidgets/images/icons/ChevronDown_white.svg);"
+                "  width: 10px; height: 10px;"
+                "}"
+                "QComboBox QAbstractItemView {"
+                "  border: 1px solid rgba(255,255,255,0.08); border-radius: 5px;"
+                "  background: rgba(40,40,40,0.95); color: white; padding: 6px 8px; outline: none;"
+                "}"
+                "QComboBox QAbstractItemView::item {"
+                "  min-height: 28px; padding: 2px 12px; margin: 2px 0;"
+                "}"
+                "QComboBox QAbstractItemView::item:hover {"
+                "  background: rgba(255,255,255,0.08); border-radius: 5px;"
+                "}"
+                "QComboBox QAbstractItemView::item:selected {"
+                "  background: rgba(96, 165, 250, 0.25); color: white; border-radius: 5px;"
+                "}"
+                "QComboBox QListView { border-radius: 5px; }"
+            )
+            line_edit_qss = "background: transparent; border: none; padding-left: 8px; color: white;"
+        else:
+            qss = (
+                "QComboBox { border: none; border-radius: 0px; background: transparent; "
+                "color: black; outline: none; }"
+                "QComboBox:hover { border: none; background: transparent; }"
+                "QComboBox:focus { border: none; background: transparent; }"
+                "QComboBox::drop-down { width: 20px; border: none; background: transparent; }"
+                "QComboBox::down-arrow {"
+                "  image: url(:/qfluentwidgets/images/icons/ChevronDown_black.svg);"
+                "  width: 10px; height: 10px;"
+                "}"
+                "QComboBox QAbstractItemView {"
+                "  border: 1px solid rgba(0,0,0,0.1); border-radius: 5px;"
+                "  background: white; color: black; padding: 6px 8px; outline: none;"
+                "}"
+                "QComboBox QAbstractItemView::item {"
+                "  min-height: 28px; padding: 2px 12px; margin: 2px 0;"
+                "}"
+                "QComboBox QAbstractItemView::item:hover {"
+                "  background: rgba(0,0,0,0.04); border-radius: 5px;"
+                "}"
+                "QComboBox QAbstractItemView::item:selected {"
+                "  background: rgba(74, 158, 255, 0.2); color: black; border-radius: 5px;"
+                "}"
+                "QComboBox QListView { border-radius: 5px; }"
+            )
+            line_edit_qss = "background: transparent; border: none; padding-left: 8px; color: black;"
+        self.setStyleSheet(qss)
+        if self.lineEdit() is not None:
+            self.lineEdit().setStyleSheet(line_edit_qss)
+
+    # ========== 下拉视图：qfw 圆角滚动条 ==========
+
+    def showPopup(self) -> None:
+        if not self._view_styled:
+            view = self.view()
+            if view is not None:
+                view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                super().showPopup()
+                sb = ScrollBar(Qt.Orientation.Vertical, view)
+                sb.setRange(sb.partnerBar.minimum(), sb.partnerBar.maximum())
+                sb.setVisible(sb.maximum() > 0)
+                sb._isEnter = True
+                sb.expand()
+                sb._isEnter = False
+                sb.collapse()
+                self._view_styled = True
+                return
+        super().showPopup()
 
     def set_items(self, items: list[tuple[Any, str]]) -> None:
         self.blockSignals(True)

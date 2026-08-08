@@ -4,3 +4,4 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = REPO_ROOT / "data"
 TEMPLATES_PATH = DATA_DIR / "templates.json"
+TRANSLATIONS_PATH = DATA_DIR / "translations.json"

@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
 
-from core.constants import FONT_WEIGHT, FONT_WIDTH
 from core.models import EDITABLE_NAME_IDS, LANG_PREFIX, LANGS, MANAGED_NAME_IDS, NAME_ID_LABELS
+from core.translations import weight_label, weight_labels, width_label, width_labels
 
 # 单元格输入提示（模板版本号占位）用自定义数据角色返回
 PLACEHOLDER_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -53,35 +53,33 @@ def is_default_visible(key: tuple) -> bool:
 # ---------------------------------------------------------------- 字重/字宽/斜体
 
 def weight_items() -> list[tuple[int, str]]:
-    return [(v, (lbl or str(v))) for v, (_, lbl, _) in FONT_WEIGHT.items()]
+    return [(v, weight_label(v, "SC")) for v in sorted(weight_labels("SC"))]
 
 
 def width_items() -> list[tuple[int, str]]:
-    items = []
-    for v, (_, lbl, _) in FONT_WIDTH.items():
-        items.append((v, "正常" if v == 5 else (lbl or str(v))))
-    return items
+    return [(v, width_label(v, "SC")) for v in sorted(width_labels("SC"))]
 
 
 ITALIC_ITEMS: list[tuple[bool, str]] = [(False, "正常"), (True, "斜体")]
 
 
 def format_weight(value) -> str:
-    if value in FONT_WEIGHT:
-        return FONT_WEIGHT[value][1] or str(value)
-    return str(value)
+    return weight_label(value, "SC")
 
 
 def format_width(value) -> str:
-    if value == 5:
-        return "正常"
-    if value in FONT_WIDTH:
-        return FONT_WIDTH[value][1] or str(value)
-    return str(value)
+    return width_label(value, "SC")
 
 
 def format_italic(value) -> str:
     return "斜体" if value else "正常"
+
+
+def _match_label(labels: dict[int, str], text: str) -> int | None:
+    for v, lbl in labels.items():
+        if text == lbl:
+            return v
+    return None
 
 
 def parse_weight(text) -> int | None:
@@ -92,8 +90,9 @@ def parse_weight(text) -> int | None:
         return int(t)
     except ValueError:
         pass
-    for v, (en, sc, _) in FONT_WEIGHT.items():
-        if t == sc or t == en:
+    for lang in LANGS:
+        v = _match_label(weight_labels(lang), t)
+        if v is not None:
             return v
     return None
 
@@ -102,14 +101,13 @@ def parse_width(text) -> int | None:
     t = (text or "").strip()
     if not t:
         return None
-    if t == "正常":
-        return 5
     try:
         return int(t)
     except ValueError:
         pass
-    for v, (en, sc, _) in FONT_WIDTH.items():
-        if t == sc or t == en or (v == 5 and t == "Normal"):
+    for lang in LANGS:
+        v = _match_label(width_labels(lang), t)
+        if v is not None:
             return v
     return None
 
