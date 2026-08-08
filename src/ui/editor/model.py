@@ -145,6 +145,10 @@ class FontTableModel(QAbstractTableModel):
                 return entry.num_glyphs
         if kind == "save":
             return entry.save_langs[key[1]]
+        if kind == "temp":
+            return entry.temp_names[key[1]]
+        if kind == "charset":
+            return entry.charsets[key[1]]
         if kind == "lang":
             return entry.names[key[1]][key[2]]
         return None
@@ -161,6 +165,10 @@ class FontTableModel(QAbstractTableModel):
                 entry.set_italic(value)
         elif kind == "save":
             entry.save_langs[key[1]] = bool(value)
+        elif kind == "temp":
+            entry.temp_names[key[1]] = str(value)
+        elif kind == "charset":
+            entry.charsets[key[1]] = str(value)
         elif kind == "lang":
             entry.names[key[1]][key[2]] = value
 

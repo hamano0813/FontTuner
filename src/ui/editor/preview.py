@@ -46,6 +46,7 @@ class FontPreviewWidget(QWidget):
         self.title.setText(entry.display_name())
         self._family = family
         self._italic = entry.italic()
+        self._weight = entry.us_weight_class
         self._render()
 
     def _clear(self) -> None:
@@ -53,6 +54,7 @@ class FontPreviewWidget(QWidget):
         self.preview_label.setText("（选择一行字体预览）")
         self._family = None
         self._italic = False
+        self._weight = 400
 
     def _family_for(self, entry: FontEntry) -> str | None:
         path = entry.font_path
@@ -79,6 +81,7 @@ class FontPreviewWidget(QWidget):
             self.preview_label.setText("（该字体无法预览）" if text != " " else "")
             return
         font = QFont(self._family, 24)
+        font.setWeight(QFont.Weight(self._weight))  # usWeightClass(100-900) ≈ QFont.Weight
         font.setItalic(self._italic)
         self.preview_label.setFont(font)
         self.preview_label.setText(text)

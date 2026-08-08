@@ -7,6 +7,11 @@ LANGS = ("SC", "TC", "JA", "EN")
 LANG_LABELS = {"SC": "简体", "TC": "繁體", "JA": "日文", "EN": "英文"}
 LANG_PREFIX = {"SC": "简", "TC": "繁", "JA": "日", "EN": "英"}
 
+# 表格头部 4 个临时名称列 → 占位符 code（{name_sc} 等，供文本字段引用）
+NAME_TEMP_CODES = {"SC": "name_sc", "TC": "name_tc", "JA": "name_jp", "EN": "name_en"}
+# 字符集列 → 占位符 code（{charset_sc} 等）
+CHARSET_TEMP_CODES = {"SC": "charset_sc", "TC": "charset_tc", "JA": "charset_jp", "EN": "charset_en"}
+
 # 方正模板中出现的全部 nameID
 MANAGED_NAME_IDS = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 256, 257, 258,
@@ -39,6 +44,8 @@ class FontEntry:
     num_glyphs: int = 0          # 只读
     names: dict[str, dict[int, str]] = field(default_factory=_empty_names)
     save_langs: dict[str, bool] = field(default_factory=lambda: {l: False for l in LANGS})
+    temp_names: dict[str, str] = field(default_factory=lambda: {l: "" for l in LANGS})
+    charsets: dict[str, str] = field(default_factory=lambda: {l: "" for l in LANGS})
     _raw_groups: set[tuple[int, int, int]] = field(default_factory=set, repr=False)
 
     @property

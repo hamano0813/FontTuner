@@ -27,7 +27,7 @@ _TAB_LANGS = ("SC", "TC", "JA", "EN")
 
 
 class _LangTab(ScrollArea):
-    """单个语言的字重/字宽标签编辑页。"""
+    """单个语言的字重/字宽标签编辑页：左列字重，右列字宽，顶部对齐。"""
 
     def __init__(self, lang: str, parent=None):
         super().__init__(parent)
@@ -36,33 +36,49 @@ class _LangTab(ScrollArea):
         self.edits: dict[tuple, LineEdit] = {}
 
         content = QWidget(self)
-        grid = QGridLayout(content)
-        grid.setSpacing(10)
-        grid.setColumnStretch(1, 1)
+        outer = QHBoxLayout(content)
+        outer.setSpacing(40)
 
-        grid.addWidget(BodyLabel("字重", content), 0, 0, 1, 2)
+        # ---- 左列：字重 ----
+        weight_widget = QWidget(content)
+        weight_grid = QGridLayout(weight_widget)
+        weight_grid.setSpacing(10)
+        weight_grid.setColumnStretch(1, 1)
+
+        weight_grid.addWidget(BodyLabel("字重", weight_widget), 0, 0, 1, 2)
         row = 1
         for value in sorted(translations.weight_labels("EN")):
-            grid.addWidget(
-                CaptionLabel(f"{value} · {translations.weight_label(value, 'EN')}", content), row, 0)
-            edit = LineEdit(content)
+            weight_grid.addWidget(
+                CaptionLabel(f"{value} · {translations.weight_label(value, 'EN')}", weight_widget), row, 0)
+            edit = LineEdit(weight_widget)
             edit.setText(translations.weight_label(value, lang))
             self.edits[("weight", value)] = edit
-            grid.addWidget(edit, row, 1)
+            weight_grid.addWidget(edit, row, 1)
             row += 1
+        weight_grid.setRowStretch(row, 1)  # 行少时整体顶部对齐
 
-        grid.addWidget(BodyLabel("字宽", content), row, 0, 1, 2)
-        row += 1
+        # ---- 右列：字宽 ----
+        width_widget = QWidget(content)
+        width_grid = QGridLayout(width_widget)
+        width_grid.setSpacing(10)
+        width_grid.setColumnStretch(1, 1)
+
+        width_grid.addWidget(BodyLabel("字宽", width_widget), 0, 0, 1, 2)
+        row = 1
         for value in sorted(translations.width_labels("EN")):
-            grid.addWidget(
-                CaptionLabel(f"{value} · {translations.width_label(value, 'EN')}", content), row, 0)
-            edit = LineEdit(content)
+            width_grid.addWidget(
+                CaptionLabel(f"{value} · {translations.width_label(value, 'EN')}", width_widget), row, 0)
+            edit = LineEdit(width_widget)
             edit.setText(translations.width_label(value, lang))
             self.edits[("width", value)] = edit
-            grid.addWidget(edit, row, 1)
+            width_grid.addWidget(edit, row, 1)
             row += 1
+        width_grid.setRowStretch(row, 1)  # 行少时整体顶部对齐
 
-        grid.setRowStretch(row, 1)
+        outer.addWidget(weight_widget, 1)
+        outer.addWidget(width_widget, 1)
+        outer.addStretch(0)
+
         self.setWidget(content)
         self.setWidgetResizable(True)
         self.enableTransparentBackground()

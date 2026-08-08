@@ -24,17 +24,24 @@ def _lang_header(lang: str, name_id: int) -> str:
 
 
 def build_columns() -> list[ColumnDef]:
-    """全部列：固定列 + 4 保存列 + 每语言组全部 20 个 name 字段。
+    """全部列：4 临时名称列 + 固定列 + 4 保存列 + 每语言组全部 20 个 name 字段。
 
     默认只显示 EDITABLE_NAME_IDS 之外的列由视图隐藏（set_extra_fields_visible）。
     """
-    cols: list[ColumnDef] = [
+    cols: list[ColumnDef] = []
+    # 表格头部 4 列：临时名称（字体名·简/繁/日/英），供 {name_sc} 等占位符引用
+    for lang in LANGS:
+        cols.append(ColumnDef(("temp", lang), f"字体名·{LANG_PREFIX[lang]}", "text"))
+    cols += [
         ColumnDef(("fixed", "fontPath"), "字体文件", "ro", editable=False),
         ColumnDef(("fixed", "weight"), "字重", "weight"),
         ColumnDef(("fixed", "width"), "字宽", "width"),
         ColumnDef(("fixed", "italic"), "斜体", "italic"),
         ColumnDef(("fixed", "numGlyphs"), "字形数", "ro", editable=False),
     ]
+    # 字形数后面 4 列：字符集（简体/繁体/GBK 等），供 {charset_sc} 等占位符引用
+    for lang in LANGS:
+        cols.append(ColumnDef(("charset", lang), f"字符集·{LANG_PREFIX[lang]}", "text"))
     for lang in LANGS:
         cols.append(ColumnDef(("save", lang), f"保存·{LANG_PREFIX[lang]}", "save"))
     for lang in LANGS:
@@ -53,7 +60,8 @@ def is_default_visible(key: tuple) -> bool:
 # ---------------------------------------------------------------- 字重/字宽/斜体
 
 def weight_items() -> list[tuple[int, str]]:
-    return [(v, weight_label(v, "SC")) for v in sorted(weight_labels("SC"))]
+    # 下拉显示字重数值（如 400），与翻译页里的数值一一对应
+    return [(v, str(v)) for v in sorted(weight_labels("SC"))]
 
 
 def width_items() -> list[tuple[int, str]]:
@@ -64,7 +72,7 @@ ITALIC_ITEMS: list[tuple[bool, str]] = [(False, "正常"), (True, "斜体")]
 
 
 def format_weight(value) -> str:
-    return weight_label(value, "SC")
+    return str(value)
 
 
 def format_width(value) -> str:

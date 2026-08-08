@@ -7,6 +7,7 @@ from fontTools.ttLib.tables._n_a_m_e import NameRecord
 
 from core import metadata as _metadata
 from core.models import LANGS, MANAGED_NAME_IDS, FontEntry
+from core.templates import format_name
 
 # 四个逻辑语言 → Windows 主记录组
 WINDOWS_LANG = {
@@ -88,6 +89,8 @@ def read_entry(font_path: str, font_index: int, font: TTFont) -> FontEntry:
         entry.save_langs[lang] = any(
             entry.names[lang][n].strip() for n in MANAGED_NAME_IDS
         )
+        # 临时名称列初始化为该语言的家族名（16 优先，回退 1），供 {name_*} 占位符引用
+        entry.temp_names[lang] = entry.names[lang][16] or entry.names[lang][1]
     return entry
 
 
@@ -121,6 +124,8 @@ def build_font_setting(entry: FontEntry) -> dict:
             # 16 一律写入解析后的家族名（含 16←1 回退），否则 prepare_metadata 会因
             # 首选家族为空而把整组记录删掉
             value = family if name_id == 16 else entry.names[lang][name_id]
+            if "{" in value:
+                value = format_name(value, entry, lang)
             setting[(name_id, *group)] = value
 
         # 镜像到字体中已有的同语言 Mac/Unicode 组（16 不可编码则整组跳过，Windows 记录为准）
@@ -133,6 +138,8 @@ def build_font_setting(entry: FontEntry) -> dict:
                 value = entry.names[lang][name_id]
                 if name_id == 16:
                     value = family
+                if "{" in value:
+                    value = format_name(value, entry, lang)
                 if name_id in (16, 17) or _encodable(mirror, value):
                     setting[(name_id, *mirror)] = value
     return setting

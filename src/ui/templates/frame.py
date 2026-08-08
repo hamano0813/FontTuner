@@ -1,7 +1,7 @@
 """厂商模板页：模板列表 + 新建/编辑/删除 + 一键应用到字体编辑页。
 
 模板可同时覆盖多个语言：每个语言（简/繁/日/英）各自维护
-版权/许可/厂商/首选家族名/版本号 字段，另有全局的字重/字宽/斜体。
+版权/商标/厂商/设计者/描述/厂商网址/许可网址/许可 字段。
 """
 
 from PySide6.QtCore import Qt
@@ -28,14 +28,17 @@ from qfluentwidgets import (
 )
 
 from core.models import LANG_LABELS, LANGS
-from core.templates import TEMPLATE_NAME_IDS, VendorTemplate, load_templates, save_templates
+from core.templates import VendorTemplate, load_templates, save_templates
 
 _TEMPLATE_FIELDS = [
     (0, "版权"),
-    (13, "许可"),
+    (7, "商标"),
     (8, "厂商"),
-    (16, "首选家族名"),
-    (5, "版本号（输入提示）"),
+    (9, "设计者"),
+    (10, "描述"),
+    (11, "厂商网址"),
+    (12, "许可网址"),
+    (13, "许可"),
 ]
 
 
@@ -89,8 +92,10 @@ class TemplateDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.segmented)
         self.viewLayout.addWidget(self.stack)
         self.format_hint = CaptionLabel(
-            "提示：家族名支持 {weight} {width} {italic} {weight_num} {width_num} 占位符，按字体动态生成；"
-            "版本号只作为输入提示，不写入数据。", self,
+            "提示：字段支持 {weight} {width} {italic} {weight_num} {width_num} "
+            "以及 {name_sc} {name_tc} {name_jp} {name_en}（临时名称）"
+            "{charset_sc} {charset_tc} {charset_jp} {charset_en}（字符集）占位符，"
+            "按字体动态生成。", self,
         )
         self.viewLayout.addWidget(self.format_hint)
 

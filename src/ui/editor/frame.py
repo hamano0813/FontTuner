@@ -21,7 +21,7 @@ from qfluentwidgets import (
 from config import option
 from core import mapping
 from core.models import LANG_PREFIX, LANGS
-from core.templates import apply_template, load_templates, template_hints
+from core.templates import apply_template, load_templates
 from ui.editor.columns import ITALIC_ITEMS, weight_items, width_items
 from ui.editor.delegates import CheckBoxDelegate, ComboDelegate, ReadOnlyDelegate, TextDelegate
 from ui.editor.model import FontTableModel
@@ -47,6 +47,7 @@ class EditorFrame(QFrame):
         self._build_layout()
 
         self.table.selectionModel().currentChanged.connect(self._on_current_changed)
+        self.model.valueChanged.connect(self._on_row_value_changed)
         self.table.setCurrentIndex(self.model.index(0, 0))
 
     # ---------------------------------------------------------------- 界面
@@ -238,9 +239,6 @@ class EditorFrame(QFrame):
             targets = list(entries)
         for e in targets:
             apply_template(e, tmpl)
-        # 版本号作为输入提示（placeholder）显示在空单元格
-        hints = {("lang", lang, nid): text for (lang, nid), text in template_hints(tmpl).items()}
-        self.model.set_cell_hints(hints)
         self.model.set_entries(entries)
         self.status_label.setText(f"已应用模板「{tmpl.name}」到 {len(targets)} 个字体")
         app_signals.project_edited.emit()
@@ -257,6 +255,13 @@ class EditorFrame(QFrame):
             self.preview.set_font(entries[current.row()])
         else:
             self.preview.set_font(None)
+
+    def _on_row_value_changed(self, row: int) -> None:
+        """单元格编辑后刷新预览（字重/斜体/宽度变化需立即反映）。"""
+        entries = self.model.get_entries()
+        current = self.table.currentIndex()
+        if current.isValid() and current.row() == row and 0 <= row < len(entries):
+            self.preview.set_font(entries[row])
 
     # ---------------------------------------------------------------- 后台线程
 

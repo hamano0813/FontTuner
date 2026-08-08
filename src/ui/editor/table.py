@@ -4,6 +4,7 @@ from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtGui import QKeyEvent, QKeySequence
 from PySide6.QtWidgets import QTableView
 from qfluentwidgets import TableView, setCustomStyleSheet
+from qfluentwidgets.common.smooth_scroll import SmoothMode
 
 from core.models import EDITABLE_NAME_IDS, LANGS
 
@@ -27,8 +28,12 @@ class FontTableView(TableView):
         self.setSelectionMode(QTableView.SelectionMode.ContiguousSelection)
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectItems)
         self.setAlternatingRowColors(False)
-        self.verticalHeader().setDefaultSectionSize(30)
+        self.verticalHeader().setVisible(False)  # 不显示行号列
         self.horizontalHeader().setHighlightSections(False)
+
+        # 关闭 qfw 平滑滚动（高行数表格 60fps 插值重绘很卡），回退到原生滚动
+        self.scrollDelagate.verticalSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
+        self.scrollDelagate.horizonSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
 
         # 语言组/额外字段显隐状态
         self._lang_visible = {lang: True for lang in LANGS}
