@@ -1,42 +1,17 @@
-"""设置页：VAS 式卡片布局（ScrollArea + SettingCardGroup），含主题与版权信息。"""
+"""设置页：VAS 式卡片布局（ScrollArea + SettingCardGroup），主题持久化 + 版权信息。"""
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QVBoxLayout
 from qfluentwidgets import (
-    ComboBox,
     FluentIcon as FIF,
+    OptionsSettingCard,
     ScrollArea,
     SettingCard,
     SettingCardGroup,
     Theme,
-    qconfig,
     setTheme,
 )
 
-
-class ThemeSettingCard(SettingCard):
-    """主题模式设置卡：右侧下拉切换浅色/深色/跟随系统。"""
-
-    def __init__(self, parent=None):
-        super().__init__(FIF.PALETTE, "主题模式", "更改界面显示颜色", parent)
-        self.combo = ComboBox(self)
-        self.combo.addItem("跟随系统", userData=Theme.AUTO)
-        self.combo.addItem("浅色", userData=Theme.LIGHT)
-        self.combo.addItem("深色", userData=Theme.DARK)
-        self.combo.currentIndexChanged.connect(self._on_changed)
-        self.hBoxLayout.addWidget(self.combo, 0, Qt.AlignmentFlag.AlignRight)
-        self.hBoxLayout.addSpacing(16)
-        self._sync_current()
-
-    def _sync_current(self) -> None:
-        idx = self.combo.findData(getattr(qconfig, "theme", Theme.AUTO))
-        if idx >= 0:
-            self.combo.setCurrentIndex(idx)
-
-    def _on_changed(self, index: int) -> None:
-        theme = self.combo.currentData()
-        if theme is not None:
-            setTheme(theme)
+from config import option
 
 
 class SettingsFrame(QFrame):
@@ -46,7 +21,11 @@ class SettingsFrame(QFrame):
         self.sub_frame = QFrame(self)
 
         # ===== 界面设置 =====
-        self.theme_card = ThemeSettingCard(self)
+        self.theme_card = OptionsSettingCard(
+            option.themeMode, FIF.PALETTE, "主题模式", "更改界面显示颜色",
+            texts=["浅色", "深色", "跟随系统设置"],
+        )
+        option.themeMode.valueChanged.connect(self._on_theme_changed)
 
         # ===== 关于 =====
         self.about_card = SettingCard(
@@ -82,3 +61,6 @@ class SettingsFrame(QFrame):
         for widget in widgets:
             group.addSettingCard(widget)
         return group
+
+    def _on_theme_changed(self, theme: Theme) -> None:
+        setTheme(theme)

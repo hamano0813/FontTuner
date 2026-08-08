@@ -1,11 +1,29 @@
-import ast
-import os
+"""字体元数据引擎：读取/写回字体的 name 表与 OS/2、head 表（GUI 核心引擎）。"""
 
-import pandas as pd
+from __future__ import annotations
+
 from fontTools.ttLib import TTFont
 
-import utils
-from constants import FONT_STYLE, FONT_WEIGHT, FONT_WIDTH
+from core.constants import FONT_STYLE, FONT_WEIGHT, FONT_WIDTH
+
+
+def translate_mapping(lang_id: int):
+    """Windows 语言 ID → FONT_WEIGHT/FONT_WIDTH/FONT_STYLE 元组的语言下标（英/简/繁）。"""
+    match lang_id:
+        case 0x0404:  # Traditional Chinese
+            return 2
+        case 0x0804:  # Simplified Chinese
+            return 1
+        case 0x0C04:  # Hong Kong SAR
+            return 2
+        case 0x1004:  # Singapore
+            return 1
+        case 0x1404:  # Macau SAR
+            return 2
+        case 0x7C04:  # PRC
+            return 1
+        case _:  # English
+            return 0
 
 
 def load_metadata(font: TTFont):
@@ -44,30 +62,6 @@ def load_metadata(font: TTFont):
             font_setting[(17, platformID, platEncID, langID)] = ""
     # return the font settings
     return font_setting
-
-
-def load(font_paths: list[str]):
-    """Load the metadata of the fonts and return them as a DataFrame."""
-    # init the list of metadata
-    metadatas = []
-    # loop through all font paths
-    for font_path in font_paths:
-        # check if the font is a TrueType or OpenType font
-        if font_path.lower().endswith(".ttf") or font_path.lower().endswith(".otf"):
-            # load the font and get the metadata
-            font = TTFont(font_path)
-            metadata = {"fontPath": font_path}
-            metadata.update(load_metadata(font))
-            metadatas.append(metadata)
-    # return the metadata as a DataFrame
-    metadata_df = pd.DataFrame(metadatas)
-    # sort the columns
-    fixed_columns = metadata_df.columns[:5]
-    sorted_columns = metadata_df.columns[5:]
-    sorted_columns = sorted(sorted_columns, key=lambda x: (x[1], x[2], x[3], x[0]))
-    new_columns = list(fixed_columns) + sorted_columns
-    # return the sorted DataFrame
-    return metadata_df[new_columns]
 
 
 def adjust_values(font: TTFont, font_setting: dict):
@@ -129,7 +123,7 @@ def prepare_metadata(font: TTFont, font_setting: dict):
             width = font["OS/2"].usWidthClass
             italic = font["OS/2"].fsSelection & 1 << 0
             # get the font style strings
-            font_switch = utils.translate_mapping(langID)
+            font_switch = translate_mapping(langID)
             weight_str = FONT_WEIGHT.get(weight, ("", "", ""))[font_switch]
             width_str = FONT_WIDTH.get(width, ("", "", ""))[font_switch]
             italic_str = FONT_STYLE.get(italic, ("", "", ""))[font_switch]
@@ -153,7 +147,7 @@ def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
         p_family = font_setting.get((16, platformID, platEncID, langID), "")
         s_family = font_setting.get((17, platformID, platEncID, langID), "")
         # get the font style strings
-        font_switch = utils.translate_mapping(langID)
+        font_switch = translate_mapping(langID)
         weight_str = FONT_WEIGHT.get(weight, ("", "", ""))[font_switch]
         width_str = FONT_WIDTH.get(width, ("", "", ""))[font_switch]
 
@@ -239,64 +233,3 @@ def save_metadata(font_setting: dict, font: TTFont | None = None, remove_groups=
     except PermissionError as e:
         print(f"Failed to save {font_setting['fontPath']}. Permission denied.")
         return False
-
-
-def rename_font(font_setting: dict):
-    """Rename the font file based on the metadata."""
-    # load the font
-    font = TTFont(font_setting["fontPath"])
-    # init the font family and subfamily and version strings
-    font_str = ""
-    sub_str = ""
-    ver_str = ""
-    # loop through all records in the font
-    for record in font["name"].names:
-        font_switch = utils.translate_mapping(record.langID)
-        if record.nameID == 16:
-            if font_switch == 1:
-                font_str = record.toUnicode()
-            elif font_switch == 2 or font_str.isascii():
-                font_str = record.toUnicode()
-            else:
-                font_str = record.toUnicode()
-    for record in font["name"].names:
-        if record.nameID == 17:
-            sub_name = record.toUnicode()
-            if sub_name and sub_name.isascii():
-                sub_str = sub_name
-                ver_str = font_setting.get((5, record.platformID, record.platEncID, record.langID), "")
-                break
-    new_name = f"{font_str} {sub_str} {ver_str}".strip()
-    # rename the font file
-    if new_name and not os.path.exists(new_name):
-        origin_path = font_setting["fontPath"]
-        origin_root = os.path.dirname(origin_path)
-        origin_ext = os.path.splitext(origin_path)[1].lower()
-        new_path = os.path.join(origin_root, new_name + origin_ext)
-        try:
-            os.rename(origin_path, new_path)
-        except FileExistsError:
-            print(f"File {new_path} already exists.")
-
-
-def save(metadata_dfs: list[pd.DataFrame]):
-    """Save the metadata of the fonts and write them back to the font files."""
-    # loop through all DataFrames
-    for metadata_df in metadata_dfs:
-        # fill the missing values
-        metadata_df.fillna("", inplace=True)
-        # convert fixed values to integers
-        metadata_df["fsSelection"] = metadata_df["fsSelection"].apply(lambda x: int(x, 2))
-        metadata_df["usWidthClass"] = metadata_df["usWidthClass"].astype(int)
-        metadata_df["usWeightClass"] = metadata_df["usWeightClass"].astype(int)
-        metadata_df["numGlyphs"] = metadata_df["numGlyphs"].astype(int)
-        # convert the columns to tuples
-        new_columns = {col: ast.literal_eval(col) if col.startswith("(") else col for col in metadata_df.columns}
-        metadata_df.rename(columns=new_columns, inplace=True)
-        # loop through all font settings
-        for _, font_setting in metadata_df.iterrows():
-            # save the metadata
-            result = save_metadata(font_setting)
-            # rename the font file
-            if result:
-                rename_font(font_setting)

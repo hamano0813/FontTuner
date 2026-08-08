@@ -1,5 +1,7 @@
 """字体编辑页：工具栏 + 字体表格 + 预览面板 + 保存集成。"""
 
+import os
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QSplitter, QVBoxLayout
 from qfluentwidgets import (
@@ -15,6 +17,7 @@ from qfluentwidgets import (
     ToggleButton,
 )
 
+from config import option
 from core import mapping
 from core.models import LANG_PREFIX, LANGS
 from core.templates import apply_template, load_templates, template_hints
@@ -142,15 +145,17 @@ class EditorFrame(QFrame):
 
     def _on_import_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "选择字体文件", "",
+            self, "选择字体文件", option.import_dir.value,
             "字体文件 (*.ttf *.otf *.ttc *.otc)",
         )
         if files:
+            option.import_dir.setValue(os.path.dirname(files[0]))
             self.import_paths(files)
 
     def _on_import_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "选择字体文件夹", "")
+        folder = QFileDialog.getExistingDirectory(self, "选择字体文件夹", option.import_dir.value)
         if folder:
+            option.import_dir.setValue(folder)
             self.import_paths([folder])
 
     def _on_load_finished(self, entries, errors):

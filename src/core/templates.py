@@ -21,9 +21,7 @@ class VendorTemplate:
     name: str
     field_values: dict[str, dict[int, str]] = field(default_factory=dict)
     # lang_key("ALL"/"SC"/"TC"/"JA"/"EN") -> {nameID: value}
-    weight: int | None = None
-    width: int | None = None
-    italic: bool | None = None
+    # 字重/字宽/斜体不属于模板，应用模板不操作这些
 
 
 def load_templates(path: str | None = None) -> list[VendorTemplate]:
@@ -64,12 +62,6 @@ def apply_template(entry: FontEntry, tmpl: VendorTemplate) -> None:
                 text = format_name(text, entry, lang)
             entry.names[lang][name_id] = text
         entry.save_langs[lang] = True  # 模板可新建该语言记录
-    if tmpl.weight is not None:
-        entry.us_weight_class = tmpl.weight
-    if tmpl.width is not None:
-        entry.us_width_class = tmpl.width
-    if tmpl.italic is not None:
-        entry.set_italic(tmpl.italic)
 
 
 def template_hints(tmpl: VendorTemplate) -> dict[tuple, str]:
@@ -114,7 +106,7 @@ def format_name(text: str, entry: FontEntry, lang: str) -> str:
 
 
 def _format_vars(entry: FontEntry, lang: str) -> dict[str, object]:
-    from constants import FONT_WEIGHT, FONT_WIDTH
+    from core.constants import FONT_WEIGHT, FONT_WIDTH
 
     weight = _label(FONT_WEIGHT, entry.us_weight_class, lang, "Regular")
     width = _label(FONT_WIDTH, entry.us_width_class, lang, "Normal")

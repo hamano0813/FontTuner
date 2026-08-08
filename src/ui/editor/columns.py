@@ -4,8 +4,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
 
-from constants import FONT_WEIGHT, FONT_WIDTH
-
+from core.constants import FONT_WEIGHT, FONT_WIDTH
 from core.models import EDITABLE_NAME_IDS, LANG_PREFIX, LANGS, MANAGED_NAME_IDS, NAME_ID_LABELS
 
 # 单元格输入提示（模板版本号占位）用自定义数据角色返回

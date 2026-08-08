@@ -5,7 +5,7 @@ from __future__ import annotations
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables._n_a_m_e import NameRecord
 
-import metadata as _metadata
+from core import metadata as _metadata
 from core.models import LANGS, MANAGED_NAME_IDS, FontEntry
 
 # 四个逻辑语言 → Windows 主记录组

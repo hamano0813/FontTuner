@@ -1,15 +1,12 @@
-"""FontTuner GUI 入口（项目根目录）。"""
+"""FontTuner GUI 入口。运行：python -B src/main.py"""
 
-import os
 import sys
-
-# 把 src 加入模块搜索路径，使 core / ui / metadata 等可直接导入
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication
-from qfluentwidgets import Theme, setTheme
+from qfluentwidgets import setTheme, setThemeColor
 
+from config import option
 from ui.main_window import MainWindow
 
 
@@ -18,7 +15,8 @@ def main():
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(sys.argv)
-    setTheme(Theme.AUTO)
+    setTheme(option.themeMode.value)
+    setThemeColor(option.themeColor.value)
 
     window = MainWindow()
     window.show()

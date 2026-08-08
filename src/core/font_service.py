@@ -7,8 +7,7 @@ from typing import Callable, Iterable
 
 from fontTools.ttLib import TTCollection
 
-import metadata as _metadata
-from core import font_io, mapping
+from core import font_io, mapping, metadata as _metadata
 from core.models import FontEntry
 
 ProgressFn = Callable[[int, int], None]

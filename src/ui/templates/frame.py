@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
-    ComboBox,
     FluentIcon as FIF,
     LineEdit,
     MessageBoxBase,
@@ -30,7 +29,6 @@ from qfluentwidgets import (
 
 from core.models import LANG_LABELS, LANGS
 from core.templates import TEMPLATE_NAME_IDS, VendorTemplate, load_templates, save_templates
-from ui.editor.columns import ITALIC_ITEMS, weight_items, width_items
 
 _TEMPLATE_FIELDS = [
     (0, "版权"),
@@ -39,16 +37,6 @@ _TEMPLATE_FIELDS = [
     (16, "首选家族名"),
     (5, "版本号（输入提示）"),
 ]
-
-_NONE_LABEL = "（不修改）"
-
-
-def _combo_with_none(items) -> ComboBox:
-    combo = ComboBox()
-    combo.addItem(_NONE_LABEL, userData=None)
-    for value, label in items:
-        combo.addItem(label, userData=value)
-    return combo
 
 
 class _LangFieldTab(QFrame):
@@ -91,23 +79,9 @@ class TemplateDialog(MessageBoxBase):
                 onClick=lambda checked=False, w=tab: self.stack.setCurrentWidget(w),
             )
 
-        # 全局样式
-        self.weight_combo = _combo_with_none(weight_items())
-        self.width_combo = _combo_with_none(width_items())
-        self.italic_combo = _combo_with_none(ITALIC_ITEMS)
-
         name_row = QHBoxLayout()
         name_row.addWidget(BodyLabel("名称", self))
         name_row.addWidget(self.name_edit, 1)
-
-        style_grid = QGridLayout()
-        style_grid.setSpacing(12)
-        style_grid.addWidget(BodyLabel("字重", self), 0, 0)
-        style_grid.addWidget(self.weight_combo, 0, 1)
-        style_grid.addWidget(BodyLabel("字宽", self), 1, 0)
-        style_grid.addWidget(self.width_combo, 1, 1)
-        style_grid.addWidget(BodyLabel("斜体", self), 2, 0)
-        style_grid.addWidget(self.italic_combo, 2, 1)
 
         self.viewLayout.addWidget(self.title_label)
         self.viewLayout.addLayout(name_row)
@@ -119,8 +93,6 @@ class TemplateDialog(MessageBoxBase):
             "版本号只作为输入提示，不写入数据。", self,
         )
         self.viewLayout.addWidget(self.format_hint)
-        self.viewLayout.addSpacing(8)
-        self.viewLayout.addLayout(style_grid)
 
         self.yesButton.setText("保存")
         self.cancelButton.setText("取消")
@@ -134,9 +106,6 @@ class TemplateDialog(MessageBoxBase):
             values = template.field_values.get(lang, {})
             for nid, edit in tab.edits.items():
                 edit.setText(values.get(nid, ""))
-        self.weight_combo.setCurrentIndex(self.weight_combo.findData(template.weight))
-        self.width_combo.setCurrentIndex(self.width_combo.findData(template.width))
-        self.italic_combo.setCurrentIndex(self.italic_combo.findData(template.italic))
 
     def result_template(self) -> VendorTemplate:
         field_values: dict[str, dict[int, str]] = {}
@@ -151,9 +120,6 @@ class TemplateDialog(MessageBoxBase):
         return VendorTemplate(
             name=self.name_edit.text().strip() or "未命名模板",
             field_values=field_values,
-            weight=self.weight_combo.currentData(),
-            width=self.width_combo.currentData(),
-            italic=self.italic_combo.currentData(),
         )
 
 

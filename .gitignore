@@ -2,3 +2,4 @@
 *.xlsx
 test*
 __pycache__
+config.json
