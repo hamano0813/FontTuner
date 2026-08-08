@@ -192,10 +192,15 @@ def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
                 break
 
 
-def save_metadata(font_setting: dict):
-    """Save the metadata of the font setting and write them back to the font file."""
-    # load the font
-    font = TTFont(font_setting["fontPath"])
+def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
+    """Apply the settings to an already-open font object (does not open or save).
+
+    remove_groups: iterable of (platformID, platEncID, langID) — 删除这些记录组的全部
+    name 记录（未勾选语言的删除语义）。
+    """
+    # remove the records of the unchecked languages
+    for platformID, platEncID, langID in remove_groups:
+        font["name"].removeNames(platformID=platformID, platEncID=platEncID, langID=langID)
     # adjust the values
     adjust_values(font, font_setting)
     # prepare the metadata
@@ -218,6 +223,15 @@ def save_metadata(font_setting: dict):
                 font["name"].setName(value, nameID, platformID, platEncID, langID)
             else:
                 font["name"].removeNames(nameID, platformID, platEncID, langID)
+
+
+def save_metadata(font_setting: dict, font: TTFont | None = None, remove_groups=()):
+    """Save the metadata of the font setting and write them back to the font file."""
+    # load the font if not given
+    if font is None:
+        font = TTFont(font_setting["fontPath"])
+    # apply the settings
+    apply_font_settings(font, font_setting, remove_groups)
     # save the font
     try:
         font.save(font_setting["fontPath"])

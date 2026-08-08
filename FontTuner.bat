@@ -19,7 +19,7 @@ shift
 goto loop
 
 :run
-python -B src\main.py %files%
+python -B gui.py %files%
 goto end
 
 :end
