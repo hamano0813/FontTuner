@@ -8,6 +8,7 @@ from pathlib import Path
 from qfluentwidgets import (
     ConfigItem,
     EnumSerializer,
+    FolderListValidator,
     FolderValidator,
     OptionsConfigItem,
     OptionsValidator,
@@ -33,6 +34,9 @@ class Option(QConfig):
 
     # 解包/打包页的输出目录，供文件对话框记忆
     package_out_dir = ConfigItem("OPTION", "PACKAGE_OUT_DIR", "", FolderValidator())
+
+    # 字体管理页扫描的字体库目录列表（持久化，重启后自动重新扫描）
+    fontmgr_folders = ConfigItem("OPTION", "FONTMGR_FOLDERS", [], FolderListValidator())
 
     # 字体预览的样例文字（PlainTextEdit 内容），重启后保留；一行一个语言
     preview_sample = ConfigItem(

@@ -22,3 +22,37 @@ class ScanWorker(QThread):
                 tree.append(node)
         font_register.save_cache()
         self.finished_ok.emit(tree, errors)
+
+
+class RegisterWorker(QThread):
+    """批量注册/注销字体，避免大量 GDI 调用阻塞界面。"""
+
+    progress = Signal(int, int)                          # done, total
+    finished_ok = Signal(object, object, object)         # registered, unregistered, errors
+
+    def __init__(self, to_register, to_unregister, parent=None):
+        super().__init__(parent)
+        self._to_register = list(to_register)
+        self._to_unregister = list(to_unregister)
+
+    def run(self):
+        registered: list[str] = []
+        unregistered: list[str] = []
+        errors: list[tuple[str, str]] = []
+        total = len(self._to_register) + len(self._to_unregister)
+        done = 0
+        for path in self._to_register:
+            if font_register.register_font(path):
+                registered.append(path)
+            else:
+                errors.append((path, "注册失败"))
+            done += 1
+            self.progress.emit(done, total)
+        for path in self._to_unregister:
+            if font_register.unregister_font(path):
+                unregistered.append(path)
+            else:
+                errors.append((path, "注销失败（可能被占用）"))
+            done += 1
+            self.progress.emit(done, total)
+        self.finished_ok.emit(registered, unregistered, errors)

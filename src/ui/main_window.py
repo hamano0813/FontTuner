@@ -25,12 +25,11 @@ class MainWindow(MSFluentWindow):
         self.translation_frame = TranslationFrame(self)
         self.settings_frame = SettingsFrame(self)
 
-        self.addSubInterface(self.editor_frame, FIF.EDIT, "字体编辑")
-        self.addSubInterface(self.package_frame, FIF.ZIP_FOLDER, "解包打包")
         self.addSubInterface(self.fontmgr_frame, FIF.LIBRARY, "字体管理")
+        self.addSubInterface(self.package_frame, FIF.ZIP_FOLDER, "解包打包")
+        self.addSubInterface(self.editor_frame, FIF.EDIT, "字体编辑")
         self.addSubInterface(self.template_frame, FIF.BRUSH, "信息模板")
-        self.addSubInterface(self.translation_frame, FIF.FONT, "翻译",
-                             position=NavigationItemPosition.BOTTOM)
+        self.addSubInterface(self.translation_frame, FIF.FONT, "翻译方案")
         self.addSubInterface(self.settings_frame, FIF.SETTING, "设置",
                              position=NavigationItemPosition.BOTTOM)
 

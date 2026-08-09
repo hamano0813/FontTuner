@@ -6,10 +6,9 @@
 
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
-    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -18,9 +17,12 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     CaptionLabel,
+    Dialog,
     FluentIcon as FIF,
+    FolderListSettingCard,
     InfoBar,
     InfoBarPosition,
+    ProgressBar,
     PushButton,
     SubtitleLabel,
     TreeWidget,
@@ -30,7 +32,36 @@ from qfluentwidgets import (
 
 from config import option
 from core import font_register
-from ui.fontmgr.worker import ScanWorker
+from ui.fontmgr.worker import RegisterWorker, ScanWorker
+
+
+class FontFoldersCard(FolderListSettingCard):
+    """字体库文件夹卡：管理字体管理页持久化的扫描目录列表，头部含添加与重新扫描按钮。"""
+
+    rescanRequested = Signal()  # 点击「重新扫描」时发出，由页面触发重扫
+
+    def __init__(self, parent=None):
+        super().__init__(
+            option.fontmgr_folders, "字体库文件夹",
+            "字体管理页扫描的目录列表，改动后自动重新加载。",
+            directory=option.import_dir.value, parent=parent,
+        )
+        self.addFolderButton.setText("添加文件夹")
+        # 头部：添加按钮右侧再放一个「重新扫描」
+        self.rescan_button = PushButton(FIF.SYNC, "重新扫描", self)
+        self.rescan_button.clicked.connect(self.rescanRequested.emit)
+        self.addWidget(self.rescan_button)
+
+    def _FolderListSettingCard__showConfirmDialog(self, item):
+        # qfw 默认确认框是英文，这里改为中文（对应 qfw 内部 __showConfirmDialog）
+        name = os.path.basename(item.folder.rstrip("\\/"))
+        box = Dialog(
+            "确认移除文件夹",
+            f"将「{name}」从列表移除后，该目录不再自动扫描（目录本身不会被删除）。",
+            self.window(),
+        )
+        box.yesSignal.connect(lambda: self._FolderListSettingCard__removeFolder(item))
+        box.exec()
 
 
 class FontManagerFrame(QFrame):
@@ -38,16 +69,15 @@ class FontManagerFrame(QFrame):
         super().__init__(parent=parent)
         self.setObjectName("FontManagerFrame")
         self._worker = None
+        self._register_worker = None
         self._registered: set[str] = set()  # 本会话内由本工具注册过的字体路径
 
         self.title = SubtitleLabel("字体管理", self)
         self.hint = CaptionLabel(
             "勾选字体即注册到 Windows（当前会话有效，重启后失效）；取消勾选即注销。系统已安装的字体将被标记。", self)
 
-        self.btn_add = PushButton(FIF.FOLDER_ADD, "选择文件夹", self)
-        self.btn_add.clicked.connect(self._on_add_folder)
-        self.btn_rescan = PushButton(FIF.SYNC, "重新扫描", self)
-        self.btn_rescan.clicked.connect(self._on_rescan)
+        self.folders_card = FontFoldersCard(self)  # 字体库目录卡：增删目录 + 重新扫描
+        self.folders_card.rescanRequested.connect(self._on_rescan)
 
         self.tree = TreeWidget(self)
         self.tree.setColumnCount(1)
@@ -69,54 +99,43 @@ class FontManagerFrame(QFrame):
 
         self.status_label = CaptionLabel("", self)
 
-        top = QHBoxLayout()
-        top.addWidget(self.btn_add)
-        top.addWidget(self.btn_rescan)
-        top.addStretch(1)
+        self.progress = ProgressBar(self)
+        self.progress.setVisible(False)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.title)
         layout.addWidget(self.hint)
         layout.addSpacing(8)
-        layout.addLayout(top)
+        layout.addWidget(self.folders_card)
         layout.addWidget(self.tree, 1)
+        layout.addWidget(self.progress)
         layout.addWidget(self.preview_title)
         layout.addWidget(self.preview_label)
         layout.addWidget(self.status_label)
         self.setLayout(layout)
 
+        # 启动时自动扫描持久化的字体库目录（本页字体库卡可管理），无需每次手动载入
+        option.fontmgr_folders.valueChanged.connect(self._on_folders_changed)
+        if option.fontmgr_folders.value:
+            self._start_scan(list(option.fontmgr_folders.value))
+
     # ---------------------------------------------------------------- 扫描
 
-    def _on_add_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "选择字体文件夹", option.import_dir.value)
-        if not folder:
-            return
-        qconfig.set(option.import_dir, folder)
-        existing = [
-            self.tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole)
-            for i in range(self.tree.topLevelItemCount())
-        ]
-        roots = [r for r in existing if r]
-        if folder not in roots:
-            roots.append(folder)  # 多个文件夹累加，不替换
-        self._start_scan(roots)
-
     def _on_rescan(self):
-        roots = [
-            self.tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole)
-            for i in range(self.tree.topLevelItemCount())
-        ]
-        roots = [r for r in roots if r]
-        if roots:
-            self._start_scan(roots)
+        folders = list(option.fontmgr_folders.value)
+        if folders:
+            self._start_scan(folders)
+
+    def _on_folders_changed(self, folders):
+        """字体库目录列表变动（设置页/本页添加）：重新扫描。"""
+        self._start_scan(list(folders))
 
     def _start_scan(self, roots: list[str]) -> None:
         if self._worker is not None:
             return
         self._worker = ScanWorker(roots, self)
         self.status_label.setText("扫描中…")
-        self.btn_add.setEnabled(False)
-        self.btn_rescan.setEnabled(False)
+        self.folders_card.rescan_button.setEnabled(False)
         self._worker.finished_ok.connect(self._on_scan_finished)
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()
@@ -135,8 +154,7 @@ class FontManagerFrame(QFrame):
                           parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
 
     def _on_worker_finished(self):
-        self.btn_add.setEnabled(True)
-        self.btn_rescan.setEnabled(True)
+        self.folders_card.rescan_button.setEnabled(True)
         self._worker = None
 
     def _build_item(self, node: dict) -> QTreeWidgetItem:
@@ -247,40 +265,66 @@ class FontManagerFrame(QFrame):
         return checked
 
     def _sync_registration(self) -> None:
-        """按当前树勾选态与 _registered 的差集统一注册/注销（批量，只弹一条汇总）。"""
+        """按当前树勾选态与 _registered 的差集批量注册/注销（后台线程，避免大量注册卡界面）。"""
         checked = self._collect_checked_fonts()
         to_register = checked - self._registered
         to_unregister = self._registered - checked
-        n_reg = n_unreg = 0
-        failed: list[str] = []
-        for path in to_register:
-            if font_register.register_font(path):
-                self._registered.add(path)
-                n_reg += 1
-            else:
-                failed.append(path)
-        for path in to_unregister:
-            if font_register.unregister_font(path):
-                self._registered.discard(path)
-                n_unreg += 1
-        if failed:
-            # 注册失败的字体回滚勾选态，并回填目录三态
+        if not to_register and not to_unregister:
+            self._update_status()
+            return
+        self._start_register(to_register, to_unregister)
+
+    def _start_register(self, to_register, to_unregister) -> None:
+        if self._register_worker is not None:
+            return
+        worker = RegisterWorker(to_register, to_unregister, self)
+        self._register_worker = worker
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)
+        self._set_busy(True)
+        worker.progress.connect(self._on_register_progress)
+        worker.finished_ok.connect(self._on_register_finished)
+        worker.finished.connect(self._on_register_worker_done)
+        worker.start()
+
+    def _on_register_progress(self, done, total):
+        if total > 0:
+            self.progress.setRange(0, total)
+            self.progress.setValue(done)
+            self.status_label.setText(f"正在更新字体注册 {done}/{total}")
+
+    def _on_register_finished(self, registered, unregistered, errors):
+        self._registered.update(registered)
+        self._registered.difference_update(unregistered)
+        # 注册失败的字体回滚勾选态，并回填目录三态
+        failed_paths = {p for p, _ in errors}
+        if failed_paths:
             self.tree.blockSignals(True)
-            self._uncheck_paths(failed)
+            self._uncheck_paths(failed_paths)
             for i in range(self.tree.topLevelItemCount()):
                 self._recompute_dir_states(self.tree.topLevelItem(i))
             self.tree.blockSignals(False)
-        if n_reg or n_unreg or failed:
-            parts = []
-            if n_reg:
-                parts.append(f"已注册 {n_reg} 个字体")
-            if n_unreg:
-                parts.append(f"已注销 {n_unreg} 个字体")
-            if failed:
-                parts.append(f"{len(failed)} 个注册失败")
+        parts = []
+        if registered:
+            parts.append(f"已注册 {len(registered)} 个字体")
+        if unregistered:
+            parts.append(f"已注销 {len(unregistered)} 个字体")
+        if errors:
+            parts.append(f"{len(errors)} 个失败")
+        if parts:
             InfoBar.info("字体注册已更新", "，".join(parts), parent=self.window(),
                          position=InfoBarPosition.TOP, duration=2500)
         self._update_status()
+
+    def _on_register_worker_done(self):
+        self.progress.setVisible(False)
+        self.status_label.setText(f"已注册 {len(self._registered)} 个字体（当前会话有效，重启后失效）")
+        self._set_busy(False)
+        self._register_worker = None
+
+    def _set_busy(self, busy: bool) -> None:
+        self.tree.setEnabled(not busy)
+        self.folders_card.rescan_button.setEnabled(not busy)
 
     def _uncheck_paths(self, paths: set[str]) -> None:
         def walk(item):
