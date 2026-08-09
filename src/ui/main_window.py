@@ -114,6 +114,9 @@ class MainWindow(MSFluentWindow):
                     e.ignore()
                     return
             super().closeEvent(e)
+            # 托盘态窗口已隐藏，Qt「最后可见窗口关闭才退出」不会触发，
+            # 必须显式退出事件循环，否则程序仍驻留托盘
+            QApplication.instance().quit()
             return
 
         if self.tray is None:
