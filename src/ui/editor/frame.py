@@ -197,7 +197,7 @@ class EditorFrame(QFrame):
     # ---------------------------------------------------------------- 导入
 
     def import_paths(self, paths: list[str], append: bool = False):
-        """外部（拖拽/命令行）传入的字体或文件夹。
+        """导入字体或文件夹（供文件选择按钮等调用）。
 
         append=True 时新字体追加到表格现有内容之后（不清空），否则整体替换。
         """
