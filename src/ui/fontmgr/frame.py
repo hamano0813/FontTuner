@@ -24,6 +24,7 @@ from qfluentwidgets import (
     InfoBarPosition,
     ProgressBar,
     PushButton,
+    SearchLineEdit,
     SubtitleLabel,
     TreeWidget,
     isDarkTheme,
@@ -85,6 +86,12 @@ class FontManagerFrame(QFrame):
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.currentItemChanged.connect(self._on_current_item_changed)
 
+        # 筛选框：按名称/家族名过滤树内容（QTreeWidgetItem 重勾选/三态，手动 show/hide 过滤）
+        self.filter_edit = SearchLineEdit(self)
+        self.filter_edit.setPlaceholderText("筛选字体…")
+        self.filter_edit.setClearButtonEnabled(True)
+        self.filter_edit.textChanged.connect(self._apply_filter)
+
         # 底部预览：4 行（简/繁/日/英），用选中字体渲染 option.preview_sample
         self.preview_title = CaptionLabel("预览", self)
         self.preview_label = QLabel(self)
@@ -108,6 +115,9 @@ class FontManagerFrame(QFrame):
         layout.addSpacing(8)
         layout.addWidget(self.folders_card)
         layout.addWidget(self.tree, 1)
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(self.filter_edit, 1)  # 撑满可用宽度
+        layout.addLayout(filter_row)
         layout.addWidget(self.progress)
         layout.addWidget(self.preview_title)
         layout.addWidget(self.preview_label)
@@ -148,6 +158,7 @@ class FontManagerFrame(QFrame):
             self.tree.addTopLevelItem(root)
             self._recompute_dir_states(root)  # 按叶子勾选态回填目录三态
         self.tree.blockSignals(False)
+        self._apply_filter(self.filter_edit.text())  # 重新套用筛选
         self.status_label.setText(f"已加载 {len(tree)} 个文件夹，勾选字体即可注册到 Windows。")
         if errors:
             InfoBar.error("部分文件夹扫描失败", f"{len(errors)} 个文件夹：{errors[0][0]}",
@@ -156,6 +167,29 @@ class FontManagerFrame(QFrame):
     def _on_worker_finished(self):
         self.folders_card.rescan_button.setEnabled(True)
         self._worker = None
+
+    def _apply_filter(self, text: str) -> None:
+        """按名称/家族名过滤树：隐藏不匹配节点，目录在无匹配子项时隐藏。"""
+        text = (text or "").strip().lower()
+        for i in range(self.tree.topLevelItemCount()):
+            self._filter_item(self.tree.topLevelItem(i), text)
+
+    def _filter_item(self, item, text: str) -> bool:
+        """返回该节点是否可见（自身或后代匹配），并递归设置隐藏。
+
+        注意：必须遍历全部子项以逐一 setHidden，不能用 any() 短路。
+        """
+        self_match = not text or text in item.text(0).lower() or text in (item.toolTip(0) or "").lower()
+        if item.childCount() > 0:
+            child_visible = False
+            for i in range(item.childCount()):
+                if self._filter_item(item.child(i), text):
+                    child_visible = True
+            visible = self_match or child_visible
+        else:
+            visible = self_match
+        item.setHidden(not visible)
+        return visible
 
     def _build_item(self, node: dict) -> QTreeWidgetItem:
         item = QTreeWidgetItem([node["name"]])
