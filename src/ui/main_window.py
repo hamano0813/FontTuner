@@ -1,6 +1,8 @@
-from PySide6.QtGui import QCloseEvent, QIcon
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QCloseEvent, QIcon, QPixmap
+from PySide6.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import MSFluentWindow, MessageBox, NavigationItemPosition
+from qfluentwidgets import MSFluentWindow, MessageBox, NavigationItemPosition, SplashScreen
 
 from ui.editor.frame import EditorFrame
 from ui.fontmgr.frame import FontManagerFrame
@@ -20,6 +22,23 @@ class MainWindow(MSFluentWindow):
         self.resize(1440, 720)
         self.setMinimumSize(960, 600)
 
+        # 启动画面（参考 srw_alpha）：qfw SplashScreen 铺满窗口，构建各页面期间常驻
+        size = QSize(self.width(), self.height())
+        self.splash = SplashScreen(
+            QIcon(QPixmap(":/splash.png").scaled(
+                size, mode=Qt.TransformationMode.SmoothTransformation)),
+            self,
+        )
+        self.splash.setIconSize(size)
+
+        self._dirty = False
+        app_signals.project_edited.connect(self._mark_dirty)
+        app_signals.project_saved.connect(self._clear_dirty)
+
+        # 先显示主窗口与 splash，再逐个构建页面（构建期间 splash 覆盖全窗口）
+        self.show()
+        QApplication.processEvents()
+
         self.editor_frame = EditorFrame(self)
         self.package_frame = PackageFrame(self)
         self.fontmgr_frame = FontManagerFrame(self)
@@ -38,9 +57,7 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.help_frame, FIF.HELP, "帮助",
                              position=NavigationItemPosition.BOTTOM)
 
-        self._dirty = False
-        app_signals.project_edited.connect(self._mark_dirty)
-        app_signals.project_saved.connect(self._clear_dirty)
+        self.splash.finish()
 
     def _mark_dirty(self):
         self._dirty = True

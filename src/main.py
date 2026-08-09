@@ -3,12 +3,12 @@
 import sys
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QApplication, QSplashScreen
+from PySide6.QtWidgets import QApplication
 from qfluentwidgets import setTheme, setThemeColor
 
 from config import option
 from core import qfw_compat
+from ui.main_window import MainWindow
 
 import res  # 注册 qrc 编译的资源（:/icon.png、:/splash.png、:/html/help.html）
 
@@ -22,16 +22,8 @@ def main():
     setTheme(option.themeMode.value)
     setThemeColor(option.themeColor.value)
 
-    # 启动画面：显示打包进资源的 splash，主窗口就绪后收尾
-    splash = QSplashScreen(QPixmap(":/splash.png"))
-    splash.show()
-    app.processEvents()
-
-    from ui.main_window import MainWindow
-
-    window = MainWindow()
+    window = MainWindow()  # MainWindow 内部创建 SplashScreen 并在构建页面期间常驻
     window.show()
-    splash.finish(window)
 
     sys.exit(app.exec())
 
