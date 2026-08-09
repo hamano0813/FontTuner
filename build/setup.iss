@@ -1,6 +1,6 @@
 #define MyAppName "拾字 FontTuner"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.7.0"
+  #define MyAppVersion "0.8.0"
 #endif
 #define MyAppPublisher "Hamano0813"
 #define MyAppExeName "FontTuner.exe"
