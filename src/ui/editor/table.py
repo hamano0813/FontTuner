@@ -10,7 +10,7 @@ from core.models import EDITABLE_NAME_IDS, LANGS
 
 _DEFAULT_WIDTHS = {
     ("fixed", "fontPath"): 220,
-    ("fixed", "weight"): 80,
+    ("fixed", "weight"): 150,
     ("fixed", "width"): 80,
     ("fixed", "italic"): 70,
     ("fixed", "numGlyphs"): 66,

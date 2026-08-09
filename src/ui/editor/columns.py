@@ -81,8 +81,8 @@ def is_default_visible(key: tuple) -> bool:
 # ---------------------------------------------------------------- 字重/字宽/斜体
 
 def weight_items() -> list[tuple[int, str]]:
-    # 下拉显示字重数值（如 400），与翻译页里的数值一一对应
-    return [(v, str(v)) for v in sorted(weight_labels("SC"))]
+    # 下拉显示「数值 · 英文标签」（如 400 · Regular），数值与翻译页一一对应
+    return [(v, f"{v} · {weight_label(v, 'EN')}") for v in sorted(weight_labels("SC"))]
 
 
 def width_items() -> list[tuple[int, str]]:
@@ -90,7 +90,8 @@ def width_items() -> list[tuple[int, str]]:
 
 
 def format_weight(value) -> str:
-    return str(value)
+    # 与下拉项一致的显示格式：数值 · 英文标签
+    return f"{value} · {weight_label(value, 'EN')}"
 
 
 def format_width(value) -> str:
@@ -116,6 +117,10 @@ def parse_weight(text) -> int | None:
         return int(t)
     except ValueError:
         pass
+    # 显示格式「400 · Regular」：取数值前缀
+    head = t.split(" · ")[0].strip()
+    if head.isdigit():
+        return int(head)
     for lang in LANGS:
         v = _match_label(weight_labels(lang), t)
         if v is not None:
