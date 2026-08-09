@@ -6,7 +6,6 @@ class _AppSignals(QObject):
 
     project_edited = Signal()   # 任意数据被修改 → 置脏标记
     project_saved = Signal()    # 保存完成 → 清脏标记
-    fonts_loaded = Signal()     # 字体列表加载完成
 
 
 app_signals = _AppSignals()

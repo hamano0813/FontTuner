@@ -110,8 +110,18 @@ def prepare_metadata(font: TTFont, font_setting: dict):
             italic_str = translations.italic_label(italic, lang)
             # create the font family string if it is empty
             if not font_setting.get((17, platformID, platEncID, langID)).strip():
-                s_family = f"{weight_str} {width_str} {italic_str}".strip().replace("  ", " ")
-                font_setting[(17, platformID, platEncID, langID)] = s_family
+                # 按 OpenType 约定组装：标准样式(400/非斜体/正常宽)只用字重标签，
+                # 否则拼 字重+字宽+斜体，避免生成 "Regular Regular"/"Bold Regular" 冗余
+                parts = []
+                if weight != 400:
+                    parts.append(weight_str)
+                if width_str:
+                    parts.append(width_str)
+                if italic:
+                    parts.append(italic_str)
+                if not parts:
+                    parts.append(weight_str)
+                font_setting[(17, platformID, platEncID, langID)] = " ".join(parts)
     # convert the set to a list and return it
     return list(langIDs)
 
@@ -160,8 +170,9 @@ def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
             # get the preferred font family and subfamily for the sub loop
             p_fam = font_setting.get((16, pid, eid, lid), "")
             s_fam = font_setting.get((17, pid, eid, lid), "")
-            # set the PostScript Name when the subfamily are ASCII
-            if s_fam.isascii():
+            # set the PostScript Name when the subfamily are ASCII（空家族/子家族名跳过，
+            # 避免生成 "Foo-" / "-Bold" 这类畸形 PS 名）
+            if p_fam and s_fam and s_fam.isascii():
                 ps_name = f"{p_fam}-{s_fam}".replace(" ", "-")
                 font["name"].setName(ps_name, 6, platformID, platEncID, langID)
                 break

@@ -270,7 +270,6 @@ class EditorFrame(QFrame):
         self._append_import = False
         sort_entries(entries)  # 统一按首选家族名→字重→字宽排序（含追加合并后的整体）
         self.model.set_entries(entries)
-        app_signals.fonts_loaded.emit()
         if errors:
             InfoBar.error("部分文件加载失败", f"{len(errors)} 个文件加载失败：{errors[0][0]}",
                           parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
@@ -440,6 +439,8 @@ class EditorFrame(QFrame):
     # ---------------------------------------------------------------- 后台线程
 
     def _start_worker(self, worker, on_finished):
+        if self._worker is not None:
+            return  # 已有处理在跑，忽略新请求（与 package/fontmgr 页一致）
         self._worker = worker
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)  # 不确定进度
