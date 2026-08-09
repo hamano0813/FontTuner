@@ -191,9 +191,12 @@ def rename_entries(entries, template: str | None = None,
     return renamed, skipped, errors
 
 
-def save_entries(entries: Iterable[FontEntry], progress: ProgressFn | None = None) -> list[tuple[str, str]]:
+def save_entries(entries: Iterable[FontEntry], progress: ProgressFn | None = None,
+                 release_font: Callable[[str], None] | None = None) -> list[tuple[str, str]]:
     """保存所有字体，按文件分组，集合文件一次写回。
 
+    release_font(path)：写入前释放应用对该字体的注册（预览注册会锁住文件，
+    导致 Windows 上写入失败）。
     Returns
     -------
     errors — (路径, 错误信息) 列表，单字体失败不中断整批。
@@ -206,6 +209,8 @@ def save_entries(entries: Iterable[FontEntry], progress: ProgressFn | None = Non
     total = len(grouped)
     for i, (path, group) in enumerate(grouped.items()):
         try:
+            if release_font is not None:
+                release_font(path)  # 解除本进程对该字体的占用，否则写入失败
             if font_io.is_collection(path):
                 _save_collection(path, group)
             else:

@@ -111,6 +111,10 @@ class BaseCellDelegate(QStyledItemDelegate):
             return None
         editor = self.widget_class(parent)
         setFont(editor, 13)
+        # 可编辑下拉：内部输入框也要同步字号，否则比表格小一号
+        le = editor.lineEdit() if hasattr(editor, "lineEdit") else None
+        if le is not None:
+            setFont(le, 13)
         return editor
 
     def setEditorData(self, editor: QWidget, index: QModelIndex) -> None:

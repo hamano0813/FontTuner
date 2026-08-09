@@ -27,13 +27,15 @@ class SaveWorker(QThread):
     progress = Signal(int, int)          # done, total
     finished_ok = Signal(object)         # errors
 
-    def __init__(self, entries: list, parent=None):
+    def __init__(self, entries: list, parent=None, release_font=None):
         super().__init__(parent)
         self._entries = entries
+        self._release_font = release_font
 
     def run(self):
         errors = font_service.save_entries(
-            self._entries, progress=self._emit_progress
+            self._entries, progress=self._emit_progress,
+            release_font=self._release_font,
         )
         self.finished_ok.emit(errors)
 

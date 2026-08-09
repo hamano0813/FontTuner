@@ -116,7 +116,7 @@ class EditorFrame(QFrame):
         self.splitter.addWidget(self.table)
         self.splitter.addWidget(self.preview)
         self.splitter.setStretchFactor(0, 1)
-        self.splitter.setSizes([520, 160])
+        self.splitter.setSizes([480, 200])
         self.splitter.setChildrenCollapsible(False)  # 拖到尽头不会把预览/表格折叠没了
         self._style_splitter()
 
@@ -310,7 +310,10 @@ class EditorFrame(QFrame):
             if not box.exec():
                 return
 
-        self._start_worker(SaveWorker(entries, self), self._on_save_finished)
+        self._start_worker(
+            SaveWorker(entries, self, release_font=self.preview.release_font),
+            self._on_save_finished,
+        )
 
     def _on_save_finished(self, errors):
         if errors:

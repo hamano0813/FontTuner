@@ -29,7 +29,7 @@ class RenameTemplateCard(ExpandGroupSettingCard):
 
         self.lineEdit = LineEdit(self)
         self.lineEdit.setClearButtonEnabled(True)
-        self.lineEdit.setFixedWidth(480)
+        self.lineEdit.setFixedWidth(720)
         self.lineEdit.setText(qconfig.get(self.configItem))
         self.lineEdit.editingFinished.connect(self._onEditingFinished)
         self.configItem.valueChanged.connect(self.setValue)

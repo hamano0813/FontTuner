@@ -73,7 +73,7 @@ class FontTableView(TableView):
     # ---------------------------------------------------------------- 右键菜单
 
     def contextMenuEvent(self, e: QContextMenuEvent):
-        menu = RoundMenu(self)
+        menu = RoundMenu(parent=self)
         del_action = Action(FIF.DELETE, "删除选中字体")
         del_action.triggered.connect(self._remove_selected_rows)
         menu.addAction(del_action)

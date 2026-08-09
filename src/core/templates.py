@@ -9,8 +9,8 @@ from dataclasses import asdict, dataclass, field
 from core.models import CHARSET_TEMP_CODES, LANGS, NAME_TEMP_CODES, FontEntry
 from core.paths import TEMPLATES_PATH
 
-# 模板可设置的字段：版权/商标/厂商/设计者/描述/厂商网址/许可网址/许可
-TEMPLATE_NAME_IDS = [0, 7, 8, 9, 10, 11, 12, 13]
+# 模板可设置的字段：全部 name 字段（家族名/子家族名/唯一标识/全名/版本/字体名/首选家族名 等）
+TEMPLATE_NAME_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 256, 257, 258]
 
 
 @dataclass
@@ -53,7 +53,8 @@ def save_templates(templates: list[VendorTemplate], path: str | None = None) -> 
 def apply_template(entry: FontEntry, tmpl: VendorTemplate) -> None:
     """把模板字段应用到单个字体，并自动勾选受影响语言的保存开关。
 
-    文本字段含 `{...}` 时按该字体的字重/字宽/斜体/临时名称/字符集动态格式化。
+    模板中为空的字段不覆盖，保留字体原有值；模板文本原样写入，
+    含 `{...}` 占位符的字段不做展开，留给「解析」按钮/保存时解析。
     """
     all_values = tmpl.field_values.get("ALL", {})
     for lang in LANGS:
@@ -62,10 +63,10 @@ def apply_template(entry: FontEntry, tmpl: VendorTemplate) -> None:
         if not values:
             continue
         for name_id, text in values.items():
-            if "{" in text:
-                text = format_name(text, entry, lang)
+            if not text or not text.strip():
+                continue  # 模板字段为空 → 跳过，保留字体原有值
             entry.names[lang][name_id] = text
-        entry.save_langs[lang] = True  # 模板可新建该语言记录
+            entry.save_langs[lang] = True  # 模板可新建该语言记录
 
 
 def resolve_entry_placeholders(entry: FontEntry, langs: tuple = LANGS) -> int:
@@ -111,10 +112,20 @@ def _format_vars(entry: FontEntry, lang: str) -> dict[str, object]:
         "weight_num": entry.us_weight_class,
         "width_num": entry.us_width_class,
     }
-    # 表格头部 4 个临时名称：{name_sc}/{name_tc}/{name_jp}/{name_en}
-    for lang, code in NAME_TEMP_CODES.items():
-        vars[code] = entry.temp_names[lang]
+    # 逐语言变量：{weight_sc} {width_sc} {italic_sc} {family_sc} {preferred_family_sc} {version_sc} ...
+    # suffix = sc/tc/jp/en（与 {name_xx} 同款语言后缀）
+    for l, code in NAME_TEMP_CODES.items():
+        suffix = code.rsplit("_", 1)[1]
+        names = entry.names[l]
+        vars[code] = entry.temp_names[l]   # {name_sc}
+        vars[f"weight_{suffix}"] = weight_label(entry.us_weight_class, l)
+        vars[f"width_{suffix}"] = width_label(entry.us_width_class, l)
+        vars[f"italic_{suffix}"] = italic_label(entry.italic(), l)
+        vars[f"family_{suffix}"] = names.get(1, "")
+        vars[f"subfamily_{suffix}"] = names.get(2, "")
+        vars[f"preferred_family_{suffix}"] = names.get(16, "")
+        vars[f"version_{suffix}"] = names.get(5, "")
     # 字符集 4 列：{charset_sc}/{charset_tc}/{charset_jp}/{charset_en}
-    for lang, code in CHARSET_TEMP_CODES.items():
-        vars[code] = entry.charsets[lang]
+    for l, code in CHARSET_TEMP_CODES.items():
+        vars[code] = entry.charsets[l]
     return vars

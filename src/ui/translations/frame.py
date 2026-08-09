@@ -1,4 +1,4 @@
-"""字重/字宽翻译页：按语言分 Tab 编辑各语言标签，保存后对已加载字体立即生效。"""
+"""字重/字宽/斜体翻译页：按语言分 Tab 编辑各语言标签，保存后对已加载字体立即生效。"""
 
 from PySide6.QtWidgets import (
     QFrame,
@@ -27,7 +27,7 @@ _TAB_LANGS = ("SC", "TC", "JA", "EN")
 
 
 class _LangTab(ScrollArea):
-    """单个语言的字重/字宽标签编辑页：左列字重，右列字宽，顶部对齐。"""
+    """单个语言的字重/字宽标签编辑页：左列字重，右列字宽 + 下方斜体，顶部对齐。"""
 
     def __init__(self, lang: str, parent=None):
         super().__init__(parent)
@@ -73,6 +73,19 @@ class _LangTab(ScrollArea):
             self.edits[("width", value)] = edit
             width_grid.addWidget(edit, row, 1)
             row += 1
+
+        # ---- 斜体：字宽列下方，正常/斜体 两行 ----
+        row += 1  # 与字宽列表隔开一行
+        width_grid.addWidget(BodyLabel("斜体", width_widget), row, 0, 1, 2)
+        row += 1
+        for flag, state in ((False, "正常"), (True, "斜体")):
+            width_grid.addWidget(
+                CaptionLabel(f"{state} · {translations.italic_label(flag, 'EN')}", width_widget), row, 0)
+            edit = LineEdit(width_widget)
+            edit.setText(translations.italic_label(flag, lang))
+            self.edits[("italic", flag)] = edit
+            width_grid.addWidget(edit, row, 1)
+            row += 1
         width_grid.setRowStretch(row, 1)  # 行少时整体顶部对齐
 
         outer.addWidget(weight_widget, 1)
@@ -88,8 +101,10 @@ class _LangTab(ScrollArea):
         for (kind, value), edit in self.edits.items():
             if kind == "weight":
                 edit.setText(translations.weight_label(value, self._lang))
-            else:
+            elif kind == "width":
                 edit.setText(translations.width_label(value, self._lang))
+            else:  # italic
+                edit.setText(translations.italic_label(value, self._lang))
 
 
 class TranslationFrame(QFrame):
@@ -97,9 +112,9 @@ class TranslationFrame(QFrame):
         super().__init__(parent=parent)
         self.setObjectName("TranslationFrame")
 
-        self.title = SubtitleLabel("字重/字宽翻译", self)
+        self.title = SubtitleLabel("字重/字宽/斜体翻译", self)
         self.hint = CaptionLabel(
-            "标签用于子家族名自动生成与模板 {weight}/{width} 占位符；保存后对已加载字体立即生效。", self)
+            "标签用于子家族名自动生成与模板 {weight}/{width}/{italic} 占位符；保存后对已加载字体立即生效。", self)
 
         self.segmented = SegmentedWidget(self)
         self.stack = QStackedWidget(self)
@@ -138,8 +153,10 @@ class TranslationFrame(QFrame):
                 label = edit.text().strip()
                 if kind == "weight":
                     translations.set_weight_label(value, lang, label)
-                else:
+                elif kind == "width":
                     translations.set_width_label(value, lang, label)
+                else:  # italic
+                    translations.set_italic_label(value, lang, label)
         translations.save()
         self.window().editor_frame.refresh_after_translations()
 

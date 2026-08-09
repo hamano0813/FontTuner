@@ -1,7 +1,6 @@
 """厂商模板页：模板列表 + 新建/编辑/删除 + 一键应用到字体编辑页。
 
-模板可同时覆盖多个语言：每个语言（简/繁/日/英）各自维护
-版权/商标/厂商/设计者/描述/厂商网址/许可网址/许可 字段。
+模板可同时覆盖多个语言：每个语言（简/繁/日/英）各自维护全部 name 字段。
 """
 
 from PySide6.QtCore import Qt
@@ -12,50 +11,64 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QStackedWidget,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     BodyLabel,
-    CaptionLabel,
     FluentIcon as FIF,
     LineEdit,
     ListWidget,
     MessageBoxBase,
     PrimaryPushButton,
     PushButton,
+    ScrollArea,
     SegmentedWidget,
     SubtitleLabel,
+    ToolTipFilter,
+    ToolTipPosition,
 )
 
-from core.models import LANG_LABELS, LANGS
-from core.templates import VendorTemplate, load_templates, save_templates
+from core.models import LANG_LABELS, LANGS, NAME_ID_LABELS
+from core.templates import TEMPLATE_NAME_IDS, VendorTemplate, load_templates, save_templates
 
-_TEMPLATE_FIELDS = [
-    (0, "版权"),
-    (7, "商标"),
-    (8, "厂商"),
-    (9, "设计者"),
-    (10, "描述"),
-    (11, "厂商网址"),
-    (12, "许可网址"),
-    (13, "许可"),
-]
+_TEMPLATE_FIELDS = [(nid, NAME_ID_LABELS[nid]) for nid in TEMPLATE_NAME_IDS]
+
+# 占位符说明（tooltip 文案），安装到每个字段输入框
+_PLACEHOLDER_HINT = (
+    "字段支持 {weight} {width} {italic} {weight_num} {width_num} "
+    "以及 {name_sc} {name_tc} {name_jp} {name_en}（临时名称）"
+    "{charset_sc} {charset_tc} {charset_jp} {charset_en}（字符集）占位符，"
+    "按字体动态生成。"
+)
 
 
-class _LangFieldTab(QFrame):
-    """单个语言的字段编辑面板。"""
+class _LangFieldTab(ScrollArea):
+    """单个语言的字段编辑面板：字段多时限定高度内部滚动。"""
 
     def __init__(self, lang: str, parent=None):
         super().__init__(parent)
         self.setObjectName(f"LangTab{lang}")
         self.edits: dict[int, LineEdit] = {}
-        grid = QGridLayout(self)
+
+        content = QWidget(self)
+        grid = QGridLayout(content)
         grid.setSpacing(12)
         for row, (nid, label) in enumerate(_TEMPLATE_FIELDS):
-            grid.addWidget(BodyLabel(label, self), row, 0)
-            edit = LineEdit(self)
+            grid.addWidget(BodyLabel(label, content), row, 0)
+            edit = LineEdit(content)
+            edit.setToolTip(_PLACEHOLDER_HINT)
+            edit.installEventFilter(
+                ToolTipFilter(edit, showDelay=300, position=ToolTipPosition.TOP)
+            )
             self.edits[nid] = edit
             grid.addWidget(edit, row, 1)
         grid.setColumnStretch(1, 1)
+        grid.setRowStretch(len(_TEMPLATE_FIELDS), 1)  # 字段少时内容顶部对齐
+
+        self.setWidget(content)
+        self.setWidgetResizable(True)
+        self.setMaximumHeight(380)  # 20 个字段也不让对话框过高，内部滚动
+        self.enableTransparentBackground()  # 保持对话框底色，不显示滚动区自带背景
 
 
 class TemplateDialog(MessageBoxBase):
@@ -90,18 +103,11 @@ class TemplateDialog(MessageBoxBase):
         self.viewLayout.addSpacing(8)
         self.viewLayout.addWidget(self.segmented)
         self.viewLayout.addWidget(self.stack)
-        self.format_hint = CaptionLabel(
-            "提示：字段支持 {weight} {width} {italic} {weight_num} {width_num} "
-            "以及 {name_sc} {name_tc} {name_jp} {name_en}（临时名称）"
-            "{charset_sc} {charset_tc} {charset_jp} {charset_en}（字符集）占位符，"
-            "按字体动态生成。", self,
-        )
-        self.viewLayout.addWidget(self.format_hint)
 
         self.yesButton.setText("保存")
         self.cancelButton.setText("取消")
 
-        self.widget.setMinimumWidth(520)
+        self.widget.setMinimumWidth(640)
         self._load(template or VendorTemplate(name=""))
 
     def _load(self, template: VendorTemplate) -> None:
