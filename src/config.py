@@ -1,9 +1,7 @@
-"""基于 QConfig 的全局配置，持久化到仓库根 config.json。
+"""基于 QConfig 的全局配置，持久化到 config.json（开发态在仓库根，打包态在 %APPDATA%\\FontTuner）。
 
 themeMode / themeColor 由 QConfig 基类提供；这里覆盖 themeMode 默认值为「跟随系统」。
 """
-
-from pathlib import Path
 
 from qfluentwidgets import (
     ConfigItem,
@@ -18,7 +16,9 @@ from qfluentwidgets import (
     qconfig,
 )
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
+from core.paths import user_data_dir
+
+CONFIG_PATH = user_data_dir() / "config.json"
 
 
 class Option(QConfig):

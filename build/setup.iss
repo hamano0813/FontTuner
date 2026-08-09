@@ -1,0 +1,285 @@
+#define MyAppName "拾字 FontTuner"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.1.0"
+#endif
+#define MyAppPublisher "Hamano0813"
+#define MyAppExeName "FontTuner.exe"
+#define MyAppShortName "FontTuner"
+#define MyAppShortCutName "拾字 FontTuner"
+#ifndef MyAppIcon
+  #define MyAppIcon "res\icon.ico"
+#endif
+
+[Setup]
+AppId={{9AE38242-B510-48D0-B59B-500620284185}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+DefaultDirName={autopf}\{#MyAppShortName}
+DefaultGroupName={#MyAppShortName}
+DisableProgramGroupPage=yes
+SetupIconFile={#MyAppIcon}
+Compression=lzma
+SolidCompression=yes
+WizardStyle=modern dynamic windows11
+Output=yes
+OutputDir=.\
+OutputBaseFilename={#MyAppShortName}-{#MyAppVersion}-x64
+ExtraDiskSpaceRequired=1181116000
+ChangesEnvironment=yes
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+
+[Dirs]
+Name: "{app}\.venv"; Flags: uninsalwaysuninstall
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\.venv"
+
+[Files]
+Source: "uv.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "uv.toml"; DestDir: "{userappdata}\uv"; Flags: ignoreversion
+Source: "{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "uninstall_helper.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: ".python-version"; DestDir: "{app}"; Flags: ignoreversion
+Source: "pyproject.toml"; DestDir: "{app}"; Flags: ignoreversion
+Source: "uv.lock"; DestDir: "{app}"; Flags: ignoreversion
+Source: "upx.exe"; DestDir: "{app}"; Flags: ignoreversion deleteafterinstall
+Source: "upx.1"; DestDir: "{app}"; Flags: ignoreversion deleteafterinstall
+Source: "trim_venv.py"; DestDir: "{app}"; Flags: ignoreversion deleteafterinstall
+Source: "script\*"; DestDir: "{app}\script"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{commondesktop}\{#MyAppShortCutName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{#MyAppName}"
+Name: "{autoprograms}\{#MyAppShortCutName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{#MyAppName}"
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppShortCutName, '&', '&&')}}"; Flags: postinstall skipifsilent unchecked
+
+[Code]
+var
+  MirrorPage: TInputQueryWizardPage;
+  DeployPage: TWizardPage;
+  DeployLog: TNewMemo;
+  UninstallChoice: Integer;
+
+procedure AppendLog(const S: string);
+begin
+  DeployLog.Lines.Add(S);
+  DeployLog.SelStart := Length(DeployLog.Lines.Text);
+end;
+
+function GetPythonVer(const AppDir: string): string;
+var
+  VerFile: string;
+  Lines: TArrayOfString;
+begin
+  Result := '3.14';
+  VerFile := AppDir + '\.python-version';
+  if LoadStringsFromFile(VerFile, Lines) and (GetArrayLength(Lines) > 0) then
+    Result := Trim(Lines[0]);
+end;
+
+function RunBat(const BatContent, WorkDir: string): Integer;
+var
+  TmpBat: string;
+  TmpLog: string;
+  Code: Integer;
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  TmpBat := ExpandConstant('{tmp}\_step.bat');
+  TmpLog := ExpandConstant('{tmp}\_step.log');
+  SaveStringToFile(TmpBat, BatContent, False);
+  Exec('cmd.exe', '/c ""' + TmpBat + '" > "' + TmpLog + '" 2>&1"',
+    WorkDir, SW_HIDE, ewWaitUntilTerminated, Code);
+  if LoadStringsFromFile(TmpLog, Lines) then
+    for I := 0 to GetArrayLength(Lines) - 1 do
+      if Lines[I] <> '' then
+        AppendLog('  ' + Lines[I]);
+  DeleteFile(TmpBat);
+  DeleteFile(TmpLog);
+  Result := Code;
+end;
+
+procedure DoDeploy;
+var
+  AppDir: string;
+  PyVer: string;
+  Ok: Boolean;
+begin
+  AppDir := ExpandConstant('{app}');
+  PyVer := GetPythonVer(AppDir);
+  Ok := True;
+
+  AppendLog('Target: ' + AppDir);
+  AppendLog('Python: ' + PyVer);
+  AppendLog('');
+
+  AppendLog('--- Installing Python ---');
+  if RunBat('@echo off' + Chr(13) + Chr(10) +
+    'cd /d "' + AppDir + '"' + Chr(13) + Chr(10) +
+    '"' + AppDir + '\uv.exe" python install ' + PyVer + Chr(13) + Chr(10),
+    AppDir) <> 0 then
+    AppendLog('[WARN] Python install may have issues.');
+
+  AppendLog('--- Installing dependencies ---');
+  if RunBat('@echo off' + Chr(13) + Chr(10) +
+    'cd /d "' + AppDir + '"' + Chr(13) + Chr(10) +
+    '"' + AppDir + '\uv.exe" sync' + Chr(13) + Chr(10),
+    AppDir) <> 0 then
+  begin
+    AppendLog('[ERROR] Dependency install failed!');
+    Ok := False;
+  end;
+
+  if Ok then
+  begin
+    AppendLog('--- Trimming venv ---');
+    RunBat('@echo off' + Chr(13) + Chr(10) +
+      '"' + AppDir + '\.venv\Scripts\python.exe" "' + AppDir + '\trim_venv.py"'
+      + ' "' + AppDir + '\.venv"' + Chr(13) + Chr(10),
+      AppDir);
+  end;
+
+  if Ok and FileExists(AppDir + '\upx.exe') then
+  begin
+    AppendLog('--- Compressing ---');
+    RunBat('@echo off' + Chr(13) + Chr(10) +
+      'cd /d "' + AppDir + '"' + Chr(13) + Chr(10) +
+      'for /r "' + AppDir + '\.venv" %%f in (*.pyd) do "' + AppDir + '\upx.exe" -1qq "%%f" 2>nul' + Chr(13) + Chr(10) +
+      '"' + AppDir + '\upx.exe" -9qq "' + AppDir + '\.venv\Scripts\python.exe" 2>nul' + Chr(13) + Chr(10) +
+      '"' + AppDir + '\upx.exe" -9qq "' + AppDir + '\.venv\Scripts\pythonw.exe" 2>nul' + Chr(13) + Chr(10),
+      AppDir);
+    AppendLog('[DONE] Compression complete.');
+  end;
+
+  AppendLog('--- Cleaning up deployment files ---');
+  DeleteFile(AppDir + '\pyproject.toml');
+  DeleteFile(AppDir + '\uv.lock');
+  DeleteFile(AppDir + '\.python-version');
+  DeleteFile(AppDir + '\uv.exe');
+  DeleteFile(AppDir + '\trim_venv.py');
+  AppendLog('[DONE] Cleanup complete.');
+
+  AppendLog('');
+  if Ok then
+    AppendLog('[INFO] Deployment complete. Click Next.')
+  else
+    AppendLog('[ERROR] Deployment had errors. Click Next.');
+
+  WizardForm.NextButton.Enabled := True;
+end;
+
+procedure DeployPageActivate(Sender: TWizardPage);
+begin
+  WizardForm.NextButton.Enabled := False;
+  DoDeploy;
+end;
+
+procedure InitializeWizard();
+var
+  IsZh: Boolean;
+begin
+  IsZh := (ActiveLanguage() = 'chinesesimplified');
+
+  if IsZh then
+    MirrorPage := CreateInputQueryPage(wpSelectDir,
+      '下载镜像', '配置 Python 包下载源',
+      '程序需要在线安装 Python 环境和依赖库，请确认网络畅通。' + Chr(13) + Chr(10) +
+      '如需使用自定义镜像，请修改下方地址：')
+  else
+    MirrorPage := CreateInputQueryPage(wpSelectDir,
+      'Download Mirror', 'Configure Python Package Mirror',
+      'This setup requires network to install Python and dependencies.' + Chr(13) + Chr(10) +
+      'Customize mirror addresses if needed:');
+  if IsZh then
+  begin
+    MirrorPage.Add('PyPI 镜像', False);
+    MirrorPage.Add('Python 镜像', False);
+  end
+  else
+  begin
+    MirrorPage.Add('PyPI Mirror', False);
+    MirrorPage.Add('Python Mirror', False);
+  end;
+  MirrorPage.Values[0] := 'https://mirrors.aliyun.com/pypi/simple/';
+  MirrorPage.Values[1] := 'https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone/';
+
+  if IsZh then
+    DeployPage := CreateCustomPage(wpInstalling, '正在部署环境',
+      '正在安装 Python 和项目依赖...')
+  else
+    DeployPage := CreateCustomPage(wpInstalling, 'Deploying Environment',
+      'Setting up Python and dependencies...');
+  DeployLog := TNewMemo.Create(DeployPage);
+  DeployLog.Parent := DeployPage.Surface;
+  DeployLog.Align := alClient;
+  DeployLog.ScrollBars := ssVertical;
+  DeployLog.ReadOnly := True;
+  DeployLog.Font.Name := 'Consolas';
+  DeployLog.Font.Size := 9;
+  DeployPage.OnActivate := @DeployPageActivate;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Cfg: string;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    Cfg := 'python-install-mirror = "' + MirrorPage.Values[1] + '"' + Chr(13) + Chr(10) +
+      Chr(13) + Chr(10) +
+      '[[index]]' + Chr(13) + Chr(10) +
+      'url = "' + MirrorPage.Values[0] + '"' + Chr(13) + Chr(10) +
+      'default = true' + Chr(13) + Chr(10);
+    SaveStringToFile(ExpandConstant('{userappdata}\uv\uv.toml'), Cfg, False);
+  end;
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  Code: Integer;
+  Ps: string;
+begin
+  Ps := ExpandConstant('{app}\uninstall_helper.ps1');
+  if not FileExists(Ps) then
+  begin
+    UninstallChoice := 1;
+    Result := True;
+    Exit;
+  end;
+  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + Ps + '"',
+    '', SW_SHOW, ewWaitUntilTerminated, Code);
+  if Code = 9 then begin Result := False; Exit; end;
+  UninstallChoice := Code;
+  Result := True;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  AppDir: string;
+  AppDataDir: string;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    AppDir := ExpandConstant('{app}');
+    // 安装根不可写时（如 Program Files），运行数据会落到 %APPDATA%\FontTuner
+    AppDataDir := ExpandConstant('{userappdata}\FontTuner');
+    case UninstallChoice of
+      2: if DirExists(AppDir + '\.venv') then
+           DelTree(AppDir + '\.venv', True, True, True);
+      3: begin
+           if DirExists(AppDir + '\.venv') then
+             DelTree(AppDir + '\.venv', True, True, True);
+           if DirExists(AppDir + '\data') then
+             DelTree(AppDir + '\data', True, True, True);
+           if DirExists(AppDataDir) then
+             DelTree(AppDataDir, True, True, True);
+           DeleteFile(AppDir + '\config.json');
+         end;
+    end;
+  end;
+end;
