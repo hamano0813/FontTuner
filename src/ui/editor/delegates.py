@@ -110,12 +110,16 @@ class BaseCellDelegate(QStyledItemDelegate):
         if self.widget_class is None:
             return None
         editor = self.widget_class(parent)
+        self._apply_editor_font(editor)
+        return editor
+
+    def _apply_editor_font(self, editor: QWidget) -> None:
+        """编辑器与表格同字号（像素 13）；可编辑下拉还要同步内部输入框，
+        否则 lineEdit 保持系统默认字号，比表格小一号。"""
         setFont(editor, 13)
-        # 可编辑下拉：内部输入框也要同步字号，否则比表格小一号
         le = editor.lineEdit() if hasattr(editor, "lineEdit") else None
         if le is not None:
             setFont(le, 13)
-        return editor
 
     def setEditorData(self, editor: QWidget, index: QModelIndex) -> None:
         self._editing_index = index
@@ -169,6 +173,7 @@ class ComboDelegate(BaseCellDelegate):
 
     def createEditor(self, parent: QWidget, option, index: QModelIndex) -> QWidget:
         editor = CellComboEditor(parent)
+        self._apply_editor_font(editor)
         editor.set_items(self._items)
         return editor
 

@@ -24,7 +24,7 @@ from core import mapping
 from core.font_service import rename_entries, sort_entries
 from core.models import LANG_PREFIX, LANGS
 from core.templates import apply_template, load_templates, resolve_entry_placeholders
-from ui.editor.columns import ITALIC_ITEMS, weight_items, width_items
+from ui.editor.columns import weight_items, width_items
 from ui.editor.delegates import CheckBoxDelegate, ComboDelegate, ReadOnlyDelegate, TextDelegate
 from ui.editor.model import FontTableModel
 from ui.editor.preview import FontPreviewWidget
@@ -189,7 +189,7 @@ class EditorFrame(QFrame):
             elif kind == "width":
                 self.table.setItemDelegateForColumn(i, ComboDelegate(width_items(), self.table))
             elif kind == "italic":
-                self.table.setItemDelegateForColumn(i, ComboDelegate(ITALIC_ITEMS, self.table))
+                self.table.setItemDelegateForColumn(i, CheckBoxDelegate(self.table))
             elif kind == "save":
                 self.table.setItemDelegateForColumn(i, CheckBoxDelegate(self.table))
             elif kind == "text":
@@ -334,7 +334,7 @@ class EditorFrame(QFrame):
             action.triggered.connect(lambda checked=False, t=tmpl: self._apply_template(t))
             menu.addAction(action)
         if not templates:
-            action = Action("（暂无模板，请在“厂商模板”页创建）")
+            action = Action("（暂无模板，请在“信息模板”页创建）")
             action.setEnabled(False)
             menu.addAction(action)
         menu.exec(self.btn_template.mapToGlobal(self.btn_template.rect().bottomLeft()))

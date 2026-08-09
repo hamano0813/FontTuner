@@ -69,7 +69,8 @@ def load() -> None:
             _width[lang].update({int(v): lbl for v, lbl in overrides.items()})
     for lang, overrides in data.get("italic", {}).items():
         if lang in _italic:
-            _italic[lang].update({k == "true": lbl for k, lbl in overrides.items()})
+            # 保存写入的是 str(True)/str(False)，字符串比较需忽略大小写，否则两个键都判为 False
+            _italic[lang].update({k.lower() == "true": lbl for k, lbl in overrides.items()})
 
 
 def save() -> None:

@@ -1,4 +1,4 @@
-"""厂商模板页：模板列表 + 新建/编辑/删除 + 一键应用到字体编辑页。
+"""信息模板页：模板列表 + 新建/编辑/删除 + 一键应用到字体编辑页。
 
 模板可同时覆盖多个语言：每个语言（简/繁/日/英）各自维护全部 name 字段。
 """
@@ -139,8 +139,8 @@ class TemplateFrame(QFrame):
         self.setObjectName("TemplateFrame")
         self._templates: list[VendorTemplate] = load_templates()
 
-        self.title = SubtitleLabel("厂商模板", self)
-        self.hint = BodyLabel("维护厂商字段集，在「字体编辑」页一键应用到选中/全部字体。", self)
+        self.title = SubtitleLabel("信息模板", self)
+        self.hint = BodyLabel("维护字体信息字段集，在「字体编辑」页一键应用到选中/全部字体。", self)
 
         self.list = ListWidget(self)
         self.list.itemSelectionChanged.connect(self._update_buttons)

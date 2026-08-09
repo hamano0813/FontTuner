@@ -89,9 +89,6 @@ def width_items() -> list[tuple[int, str]]:
     return [(v, width_label(v, "SC")) for v in sorted(width_labels("SC"))]
 
 
-ITALIC_ITEMS: list[tuple[bool, str]] = [(False, "正常"), (True, "斜体")]
-
-
 def format_weight(value) -> str:
     return str(value)
 

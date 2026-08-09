@@ -9,9 +9,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from qfluentwidgets import (
-    BodyLabel,
     CaptionLabel,
     FluentIcon as FIF,
+    HeaderCardWidget,
     LineEdit,
     PrimaryPushButton,
     PushButton,
@@ -27,7 +27,8 @@ _TAB_LANGS = ("SC", "TC", "JA", "EN")
 
 
 class _LangTab(ScrollArea):
-    """单个语言的字重/字宽标签编辑页：左列字重，右列字宽 + 下方斜体，顶部对齐。"""
+    """单个语言的字重/字宽/斜体翻译页：左字重卡，右字宽卡+斜体卡（纵向叠放）。
+    卡体行布局与原来一致：单列 值·EN标签 | 输入框。"""
 
     def __init__(self, lang: str, parent=None):
         super().__init__(parent)
@@ -37,64 +38,65 @@ class _LangTab(ScrollArea):
 
         content = QWidget(self)
         outer = QHBoxLayout(content)
-        outer.setSpacing(40)
+        outer.setSpacing(12)
 
-        # ---- 左列：字重 ----
-        weight_widget = QWidget(content)
-        weight_grid = QGridLayout(weight_widget)
-        weight_grid.setSpacing(10)
-        weight_grid.setColumnStretch(1, 1)
+        # ---- 左：字重卡 ----
+        weight_card = HeaderCardWidget("字重", content)
+        self._fill_rows(
+            weight_card,
+            sorted(translations.weight_labels("EN")),
+            label_fn=lambda v: f"{v} · {translations.weight_label(v, 'EN')}",
+            getter_fn=lambda v: translations.weight_label(v, lang),
+            key_fn=lambda v: ("weight", v),
+        )
+        outer.addWidget(weight_card, 1)
 
-        weight_grid.addWidget(BodyLabel("字重", weight_widget), 0, 0, 1, 2)
-        row = 1
-        for value in sorted(translations.weight_labels("EN")):
-            weight_grid.addWidget(
-                CaptionLabel(f"{value} · {translations.weight_label(value, 'EN')}", weight_widget), row, 0)
-            edit = LineEdit(weight_widget)
-            edit.setText(translations.weight_label(value, lang))
-            self.edits[("weight", value)] = edit
-            weight_grid.addWidget(edit, row, 1)
-            row += 1
-        weight_grid.setRowStretch(row, 1)  # 行少时整体顶部对齐
+        # ---- 右：字宽卡 + 斜体卡（纵向叠放）----
+        right = QWidget(content)
+        right_box = QVBoxLayout(right)
+        right_box.setSpacing(12)
 
-        # ---- 右列：字宽 ----
-        width_widget = QWidget(content)
-        width_grid = QGridLayout(width_widget)
-        width_grid.setSpacing(10)
-        width_grid.setColumnStretch(1, 1)
+        width_card = HeaderCardWidget("字宽", content)
+        self._fill_rows(
+            width_card,
+            sorted(translations.width_labels("EN")),
+            label_fn=lambda v: f"{v} · {translations.width_label(v, 'EN')}",
+            getter_fn=lambda v: translations.width_label(v, lang),
+            key_fn=lambda v: ("width", v),
+        )
+        right_box.addWidget(width_card)
 
-        width_grid.addWidget(BodyLabel("字宽", width_widget), 0, 0, 1, 2)
-        row = 1
-        for value in sorted(translations.width_labels("EN")):
-            width_grid.addWidget(
-                CaptionLabel(f"{value} · {translations.width_label(value, 'EN')}", width_widget), row, 0)
-            edit = LineEdit(width_widget)
-            edit.setText(translations.width_label(value, lang))
-            self.edits[("width", value)] = edit
-            width_grid.addWidget(edit, row, 1)
-            row += 1
+        italic_card = HeaderCardWidget("斜体", content)
+        self._fill_rows(
+            italic_card,
+            [False, True],
+            label_fn=lambda f: f"{'正常' if not f else '斜体'} · {translations.italic_label(f, 'EN')}",
+            getter_fn=lambda f: translations.italic_label(f, lang),
+            key_fn=lambda f: ("italic", f),
+        )
+        right_box.addWidget(italic_card)
+        right_box.addStretch(1)
 
-        # ---- 斜体：字宽列下方，正常/斜体 两行 ----
-        row += 1  # 与字宽列表隔开一行
-        width_grid.addWidget(BodyLabel("斜体", width_widget), row, 0, 1, 2)
-        row += 1
-        for flag, state in ((False, "正常"), (True, "斜体")):
-            width_grid.addWidget(
-                CaptionLabel(f"{state} · {translations.italic_label(flag, 'EN')}", width_widget), row, 0)
-            edit = LineEdit(width_widget)
-            edit.setText(translations.italic_label(flag, lang))
-            self.edits[("italic", flag)] = edit
-            width_grid.addWidget(edit, row, 1)
-            row += 1
-        width_grid.setRowStretch(row, 1)  # 行少时整体顶部对齐
-
-        outer.addWidget(weight_widget, 1)
-        outer.addWidget(width_widget, 1)
-        outer.addStretch(0)
+        outer.addWidget(right, 1)
 
         self.setWidget(content)
         self.setWidgetResizable(True)
         self.enableTransparentBackground()
+
+    def _fill_rows(self, card, values, label_fn, getter_fn, key_fn) -> None:
+        """卡体行布局：单列 (值·EN标签 | 输入框)，与原来保持一致。"""
+        body = QWidget(card)
+        grid = QGridLayout(body)
+        grid.setSpacing(10)
+        grid.setColumnStretch(1, 1)
+        for row, value in enumerate(values):
+            grid.addWidget(CaptionLabel(label_fn(value), body), row, 0)
+            edit = LineEdit(body)
+            edit.setText(getter_fn(value))
+            self.edits[key_fn(value)] = edit
+            grid.addWidget(edit, row, 1)
+        grid.setRowStretch(len(values), 1)  # 行少时卡体内整体顶部对齐
+        card.viewLayout.addWidget(body)
 
     def refresh(self) -> None:
         """从 translations 重新载入标签到输入框。"""

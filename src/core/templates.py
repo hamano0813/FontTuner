@@ -1,16 +1,20 @@
-"""厂商模板：字段集 + JSON 持久化 + 一键应用。"""
+"""信息模板：字段集 + JSON 持久化 + 一键应用。"""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field
 
 from core.models import CHARSET_TEMP_CODES, LANGS, NAME_TEMP_CODES, FontEntry
 from core.paths import TEMPLATES_PATH
 
-# 模板可设置的字段：全部 name 字段（家族名/子家族名/唯一标识/全名/版本/字体名/首选家族名 等）
-TEMPLATE_NAME_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 256, 257, 258]
+# 模板可设置的字段：全部 name 字段，排除版权(0)与子家族名(2)。
+# 版权不靠模板编辑；子家族名在应用模板时按字重隐式写 Bold/Regular。
+TEMPLATE_NAME_IDS = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 256, 257, 258]
+# 应用模板时不从模板读取的字段（兼容旧模板 JSON 里的残留值）
+_TEMPLATE_SKIP_IDS = (0, 2)
 
 
 @dataclass
@@ -55,6 +59,8 @@ def apply_template(entry: FontEntry, tmpl: VendorTemplate) -> None:
 
     模板中为空的字段不覆盖，保留字体原有值；模板文本原样写入，
     含 `{...}` 占位符的字段不做展开，留给「解析」按钮/保存时解析。
+    版权(0)/子家族名(2) 不从模板读取；子家族名对勾选保存的语言
+    隐式写固定文本：字重 700 → Bold，其余 → Regular（不分语言）。
     """
     all_values = tmpl.field_values.get("ALL", {})
     for lang in LANGS:
@@ -63,10 +69,17 @@ def apply_template(entry: FontEntry, tmpl: VendorTemplate) -> None:
         if not values:
             continue
         for name_id, text in values.items():
+            if name_id in _TEMPLATE_SKIP_IDS:
+                continue  # 版权/子家族名不靠模板编辑
             if not text or not text.strip():
                 continue  # 模板字段为空 → 跳过，保留字体原有值
             entry.names[lang][name_id] = text
             entry.save_langs[lang] = True  # 模板可新建该语言记录
+    # 子家族名隐式设置：勾选保存的语言统一写固定文本（不分语言）
+    subfamily = "Bold" if entry.us_weight_class == 700 else "Regular"
+    for lang in LANGS:
+        if entry.save_langs[lang]:
+            entry.names[lang][2] = subfamily
 
 
 def resolve_entry_placeholders(entry: FontEntry, langs: tuple = LANGS) -> int:
@@ -87,19 +100,36 @@ def resolve_entry_placeholders(entry: FontEntry, langs: tuple = LANGS) -> int:
 
 # ---------------------------------------------------------------- 格式化
 
+_EMPTY_SENTINEL = "\x00"  # 解析为空文本的占位符哨兵，连同前导空白一并删除
+
+
 class _SafeDict(dict):
     def __missing__(self, key):
         return "{" + key + "}"  # 未识别的占位符原样保留
 
 
 def format_name(text: str, entry: FontEntry, lang: str) -> str:
-    """把含 {weight}/{width}/{italic} 等占位符的模板文本按字体动态生成。"""
+    """把含 {weight}/{width}/{italic} 等占位符的模板文本按字体动态生成。
+
+    占位符解析为空文本时，连同其前导空白一并删除
+    （如 "A {width}" → "A"，"A {width} B" → "A B"）。
+    """
     if "{" not in text:
         return text
+    vars = {
+        # 仅空字符串视为空（weight_num/width_num 等数值 0 不误判）
+        k: (_EMPTY_SENTINEL if isinstance(v, str) and not v else v)
+        for k, v in _format_vars(entry, lang).items()
+    }
     try:
-        return text.format_map(_SafeDict(_format_vars(entry, lang)))
+        result = text.format_map(_SafeDict(vars))
     except (KeyError, IndexError, ValueError):
         return text  # 格式不合法时原样保留
+    if _EMPTY_SENTINEL in result:
+        result = re.sub(r"\s*\x00", "", result)  # 删掉空占位符及其前导空白
+        result = result.replace(_EMPTY_SENTINEL, "")  # 保险：哨兵不应残留
+        result = result.strip()  # 清掉空占位符在开头/结尾留下的空格
+    return result
 
 
 def _format_vars(entry: FontEntry, lang: str) -> dict[str, object]:

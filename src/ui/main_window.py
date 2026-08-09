@@ -22,7 +22,7 @@ class MainWindow(MSFluentWindow):
         self.settings_frame = SettingsFrame(self)
 
         self.addSubInterface(self.editor_frame, FIF.EDIT, "字体编辑")
-        self.addSubInterface(self.template_frame, FIF.BRUSH, "厂商模板")
+        self.addSubInterface(self.template_frame, FIF.BRUSH, "信息模板")
         self.addSubInterface(self.translation_frame, FIF.FONT, "翻译",
                              position=NavigationItemPosition.BOTTOM)
         self.addSubInterface(self.settings_frame, FIF.SETTING, "设置",
