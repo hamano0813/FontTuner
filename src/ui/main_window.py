@@ -36,8 +36,11 @@ class MainWindow(MSFluentWindow):
         app_signals.project_saved.connect(self._clear_dirty)
 
         # 先显示主窗口与 splash，再逐个构建页面（构建期间 splash 覆盖全窗口）
+        # 注意：居中须在 show() 之后，否则 MSFluentWindow 的 4px 边框尚未建立，
+        # frameGeometry 与 geometry 相同，居中出现 2px 偏差（splash 已覆盖，调整不可见）
         self.show()
         QApplication.processEvents()
+        self._center_on_screen()
 
         self.editor_frame = EditorFrame(self)
         self.package_frame = PackageFrame(self)
@@ -64,6 +67,21 @@ class MainWindow(MSFluentWindow):
 
     def _clear_dirty(self):
         self._dirty = False
+
+    def _center_on_screen(self) -> None:
+        """初始化窗口位置为当前屏幕居中（参考 srw_alpha 的 init_pos）。
+
+        用 frameGeometry 计算，避免 MSFluentWindow 的 4px 边框使窗口右缘偏出 2px。
+        """
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        rect = screen.availableGeometry()
+        frame = self.frameGeometry()
+        self.move(
+            rect.x() + (rect.width() - frame.width()) // 2,
+            rect.y() + (rect.height() - frame.height()) // 2,
+        )
 
     def reset_style(self):
         """主题切换后刷新所有控件的自定义样式。"""
