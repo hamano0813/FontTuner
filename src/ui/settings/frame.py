@@ -135,12 +135,13 @@ class SettingsFrame(QFrame):
 
         # ===== 关于 =====
         self.about_card = SettingCard(
-            FIF.INFO, "FontTuner",
-            "批量编辑字体元数据：字重/字宽/斜体、多语言名称及版权、许可、厂商等信息。支持 .ttf/.otf/.ttc/.otc。",
+            FIF.INFO, "拾字 FontTuner",
+            "批量编辑字体元数据（字重/字宽/斜体、多语言名称、版权/许可/厂商等）；TTC/OTC 集合解包与打包；"
+            "注册字体到 Windows；并提供信息模板、跨语言翻译与多语言预览。支持 .ttf/.otf/.ttc/.otc。",
             self,
         )
         self.copyright_card = SettingCard(
-            FIF.COPY, "版权信息", "© 2026 FontTuner · 保留所有权利", self,
+            FIF.COPY, "版权信息", "© 2026 拾字 FontTuner · 保留所有权利", self,
         )
 
         # 无分组标题、无说明 label：SettingCard 自然叠放

@@ -14,7 +14,7 @@ from ui.translations.frame import TranslationFrame
 class MainWindow(MSFluentWindow):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.setWindowTitle("FontTuner")
+        self.setWindowTitle("拾字 FontTuner")
         self.resize(1280, 800)
         self.setMinimumSize(960, 600)
 

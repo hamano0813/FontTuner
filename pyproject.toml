@@ -1,9 +1,11 @@
 [project]
 name = "fonttuner"
 version = "0.1.0"
-description = "Add your description here"
+description = "拾字 FontTuner — 字体元数据编辑 / 解包打包 / 字体管理工具"
 readme = "README.md"
 requires-python = ">=3.14"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 dependencies = [
     "fonttools>=4.63.0",
     "pyside6-fluent-widgets[full]>=1.11.3",

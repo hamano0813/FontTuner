@@ -125,7 +125,9 @@ class FontManagerFrame(QFrame):
         self.tree.blockSignals(True)
         self.tree.clear()
         for node in tree:
-            self.tree.addTopLevelItem(self._build_item(node))
+            root = self._build_item(node)
+            self.tree.addTopLevelItem(root)
+            self._recompute_dir_states(root)  # 按叶子勾选态回填目录三态
         self.tree.blockSignals(False)
         self.status_label.setText(f"已加载 {len(tree)} 个文件夹，勾选字体即可注册到 Windows。")
         if errors:
@@ -140,20 +142,20 @@ class FontManagerFrame(QFrame):
     def _build_item(self, node: dict) -> QTreeWidgetItem:
         item = QTreeWidgetItem([node["name"]])
         item.setData(0, Qt.ItemDataRole.UserRole, node["path"])
-        if node["is_font"] and not node["installed"]:
-            # 可勾选字体叶子（QTreeWidgetItem 默认即含 ItemIsUserCheckable，这里显式保留）
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(
-                0, Qt.CheckState.Checked if node["path"] in self._registered else Qt.CheckState.Unchecked)
-            item.setToolTip(0, node["family"] or node["name"])
-        else:
-            # 目录 / 已装字体：清除默认勾选 flag，不提供勾选
+        if node["is_font"] and node["installed"]:
+            # 系统已装：灰显标记，不提供勾选，避免误卸系统字体
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+            item.setText(0, f"{node['name']}（系统已安装）")
+            item.setForeground(0, QColor("#8a8a8a"))
+            item.setToolTip(0, f"{node['family'] or node['name']} — 已由系统安装，无需注册")
+        else:
+            # 目录与可注册字体：都提供勾选框（目录勾选 = 整目录批量注册）
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(0, Qt.CheckState.Unchecked)
             if node["is_font"]:
-                # 系统已装：灰显标记，避免误卸系统字体
-                item.setText(0, f"{node['name']}（系统已安装）")
-                item.setForeground(0, QColor("#8a8a8a"))
-                item.setToolTip(0, f"{node['family'] or node['name']} — 已由系统安装，无需注册")
+                item.setCheckState(
+                    0, Qt.CheckState.Checked if node["path"] in self._registered else Qt.CheckState.Unchecked)
+                item.setToolTip(0, node["family"] or node["name"])
         for child in node.get("children", []):
             item.addChild(self._build_item(child))
         return item
@@ -161,12 +163,32 @@ class FontManagerFrame(QFrame):
     # ---------------------------------------------------------------- 注册/注销
 
     def _on_item_changed(self, item, column):
-        if column != 0 or item.childCount() > 0:
+        if column != 0:
             return
         path = item.data(0, Qt.ItemDataRole.UserRole)
-        if not path or not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
+        if not path:
             return
-        if item.checkState(0) == Qt.CheckState.Checked:
+        state = item.checkState(0)
+        if item.childCount() > 0:
+            # 目录：把勾选态传播到整棵子树，再统一注册/注销（只弹一条汇总）
+            if state == Qt.CheckState.Checked:
+                self._set_descendants_checked(item, True)
+                self._sync_registration()
+            elif state == Qt.CheckState.Unchecked:
+                self._set_descendants_checked(item, False)
+                self._sync_registration()
+            # PartiallyChecked 是程序回填的展示态，不响应
+        elif item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+            self._toggle_font(item, state == Qt.CheckState.Checked)
+        else:
+            return  # 已装字体不可勾选
+        self._update_ancestors(item)
+        self._update_status()
+
+    def _toggle_font(self, item, checked: bool) -> None:
+        """单个字体叶子勾选/取消：注册/注销该字体。"""
+        path = item.data(0, Qt.ItemDataRole.UserRole)
+        if checked:
             if font_register.register_font(path):
                 is_new = path not in self._registered
                 self._registered.add(path)
@@ -187,7 +209,124 @@ class FontManagerFrame(QFrame):
                     item.setCheckState(0, Qt.CheckState.Checked)  # 失败回滚（正被占用）
                     InfoBar.warning("注销失败", f"{os.path.basename(path)} 正被占用，无法注销",
                                     parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+
+    def _set_descendants_checked(self, dir_item, checked: bool) -> None:
+        """把目录勾选态批量写到整棵子树（阻塞信号，避免逐项触发注册）。"""
+        self.tree.blockSignals(True)
+        self._set_descendants_recursive(dir_item, checked)
+        self.tree.blockSignals(False)
+
+    def _set_descendants_recursive(self, item, checked: bool) -> None:
+        for i in range(item.childCount()):
+            child = item.child(i)
+            if child.childCount() > 0:
+                child.setCheckState(
+                    0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+                self._set_descendants_recursive(child, checked)
+            elif child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                child.setCheckState(
+                    0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+
+    def _collect_checked_fonts(self) -> set[str]:
+        """遍历整棵树，收集所有已勾选的字体叶子路径。"""
+        checked: set[str] = set()
+
+        def walk(item):
+            for i in range(item.childCount()):
+                child = item.child(i)
+                if child.childCount() > 0:
+                    walk(child)
+                elif (child.flags() & Qt.ItemFlag.ItemIsUserCheckable
+                      and child.checkState(0) == Qt.CheckState.Checked):
+                    path = child.data(0, Qt.ItemDataRole.UserRole)
+                    if path:
+                        checked.add(path)
+
+        for i in range(self.tree.topLevelItemCount()):
+            walk(self.tree.topLevelItem(i))
+        return checked
+
+    def _sync_registration(self) -> None:
+        """按当前树勾选态与 _registered 的差集统一注册/注销（批量，只弹一条汇总）。"""
+        checked = self._collect_checked_fonts()
+        to_register = checked - self._registered
+        to_unregister = self._registered - checked
+        n_reg = n_unreg = 0
+        failed: list[str] = []
+        for path in to_register:
+            if font_register.register_font(path):
+                self._registered.add(path)
+                n_reg += 1
+            else:
+                failed.append(path)
+        for path in to_unregister:
+            if font_register.unregister_font(path):
+                self._registered.discard(path)
+                n_unreg += 1
+        if failed:
+            # 注册失败的字体回滚勾选态，并回填目录三态
+            self.tree.blockSignals(True)
+            self._uncheck_paths(failed)
+            for i in range(self.tree.topLevelItemCount()):
+                self._recompute_dir_states(self.tree.topLevelItem(i))
+            self.tree.blockSignals(False)
+        if n_reg or n_unreg or failed:
+            parts = []
+            if n_reg:
+                parts.append(f"已注册 {n_reg} 个字体")
+            if n_unreg:
+                parts.append(f"已注销 {n_unreg} 个字体")
+            if failed:
+                parts.append(f"{len(failed)} 个注册失败")
+            InfoBar.info("字体注册已更新", "，".join(parts), parent=self.window(),
+                         position=InfoBarPosition.TOP, duration=2500)
         self._update_status()
+
+    def _uncheck_paths(self, paths: set[str]) -> None:
+        def walk(item):
+            for i in range(item.childCount()):
+                child = item.child(i)
+                if child.childCount() > 0:
+                    walk(child)
+                elif child.data(0, Qt.ItemDataRole.UserRole) in paths:
+                    child.setCheckState(0, Qt.CheckState.Unchecked)
+
+        for i in range(self.tree.topLevelItemCount()):
+            walk(self.tree.topLevelItem(i))
+
+    def _update_ancestors(self, item) -> None:
+        """自底向上刷新祖先目录的三态（部分勾选显示半选）。"""
+        self.tree.blockSignals(True)
+        parent = item.parent()
+        while parent is not None:
+            checkable = [parent.child(i) for i in range(parent.childCount())
+                         if parent.child(i).flags() & Qt.ItemFlag.ItemIsUserCheckable]
+            if checkable:
+                if all(c.checkState(0) == Qt.CheckState.Checked for c in checkable):
+                    parent.setCheckState(0, Qt.CheckState.Checked)
+                elif all(c.checkState(0) == Qt.CheckState.Unchecked for c in checkable):
+                    parent.setCheckState(0, Qt.CheckState.Unchecked)
+                else:
+                    parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
+            parent = parent.parent()
+        self.tree.blockSignals(False)
+
+    def _recompute_dir_states(self, item) -> None:
+        """自底向上按子项勾选态刷新目录节点三态。"""
+        for i in range(item.childCount()):
+            self._recompute_dir_states(item.child(i))
+        if item.childCount() == 0:
+            return
+        checkable = [item.child(i) for i in range(item.childCount())
+                     if item.child(i).flags() & Qt.ItemFlag.ItemIsUserCheckable]
+        if not checkable:
+            return
+        if all(c.checkState(0) == Qt.CheckState.Checked for c in checkable):
+            item.setCheckState(0, Qt.CheckState.Checked)
+        elif all(c.checkState(0) == Qt.CheckState.Unchecked for c in checkable):
+            item.setCheckState(0, Qt.CheckState.Unchecked)
+        else:
+            item.setCheckState(0, Qt.CheckState.PartiallyChecked)
 
     def _update_status(self) -> None:
         self.status_label.setText(f"已注册 {len(self._registered)} 个字体（当前会话有效，重启后失效）")

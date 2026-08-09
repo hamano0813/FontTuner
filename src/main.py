@@ -1,4 +1,4 @@
-"""FontTuner GUI 入口。运行：python -B src/main.py"""
+"""拾字 GUI 入口。运行：python -B src/main.py"""
 
 import sys
 
