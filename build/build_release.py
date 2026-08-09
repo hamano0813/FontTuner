@@ -39,7 +39,7 @@ COPYRIGHT = "Copyright © 2026 Hamano0813"
 
 # 入口与顶层文件（编译为 script/ 下的 .pyc）
 ENTRY_BAT = "main.bat"           # build/main.bat → 安装根执行入口
-TOP_FILES = ["main.py", "config.py"]
+TOP_FILES = ["main.py", "config.py", "res.py"]
 SRC_PACKAGES = ["core", "ui"]    # 编译为 script/<pkg>/*.pyc
 
 # 外部工具（缺失则对应步骤跳过并警告）

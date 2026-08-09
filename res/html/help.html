@@ -1,0 +1,114 @@
+<h1 id="拾字-fonttuner">拾字 FontTuner</h1>
+<blockquote>
+<p>字体元数据编辑 · TTC/OTC 解包打包 · 字体管理 ——
+面向简体/繁体/日文/英文四语言的专业字体工具。</p>
+</blockquote>
+<p>拾字 FontTuner 是一个基于 PySide6 + <a href="https://github.com/zhiyiYo/PySide6-Fluent-Widgets">PySide6-Fluent-Widgets</a>（qfw）的
+Windows 桌面应用。它围绕字体文件（<code>.ttf</code> / <code>.otf</code>
+/ <code>.ttc</code> / <code>.otc</code>）的 <strong>name
+表元数据</strong> 提供批量编辑能力，并附带解包打包与字体注册管理。</p>
+<h2 id="功能一览">功能一览</h2>
+<table>
+<thead>
+<tr>
+<th>页面</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>字体管理</strong></td>
+<td>树形浏览字体库文件夹，勾选即注册到
+Windows（当前会话有效），系统已装字体灰显标记；目录级三态勾选、按名称/家族名筛选、底部多语言预览</td>
+</tr>
+<tr>
+<td><strong>解包打包</strong></td>
+<td><code>.ttc</code>/<code>.otc</code> 集合 → 拆成独立
+<code>.ttf</code>/<code>.otf</code>；多个
+<code>.ttf</code>/<code>.otf</code> → 合并成
+<code>.ttc</code>/<code>.otc</code>。按字体内名称命名，重名自动加序号</td>
+</tr>
+<tr>
+<td><strong>字体编辑</strong></td>
+<td>批量编辑 name 表 20 个字段 ×
+简/繁/日/英四种语言：家族名、子家族名、唯一标识、全名、字体名、版权、厂商、许可等；字重/字宽/斜体直接编辑；临时名称/字符集占位列</td>
+</tr>
+<tr>
+<td><strong>信息模板</strong></td>
+<td>维护字体信息字段集（JSON
+持久化），在「字体编辑」页一键应用到选中/全部字体；支持
+<code>{weight}</code>、<code>{family_sc}</code>
+等占位符，解析为空文本时自动删除前导空格</td>
+</tr>
+<tr>
+<td><strong>翻译方案</strong></td>
+<td>字重/字宽/斜体标签的简繁日英跨语言定义，供下拉框、表格显示与占位符解析统一使用</td>
+</tr>
+<tr>
+<td><strong>设置</strong></td>
+<td>主题模式/主题色、字体文件重命名模板、预览文字与字号、关于与版权</td>
+</tr>
+</tbody>
+</table>
+<h3 id="字体编辑细节">字体编辑细节</h3>
+<ul>
+<li><strong>四语言编辑</strong>：简（sc）/ 繁（tc）/ 日（jp）/
+英（en）语言开关，可单独显示/隐藏；每语言覆盖 name 表 20
+个字段，勾选「保存」的语言才写入。</li>
+<li><strong>占位符解析</strong>：重命名、模板应用、保存时支持
+<code>{weight}</code>、<code>{weight_sc}</code>、<code>{width}</code>、<code>{italic}</code>、<code>{family_sc}</code>、<code>{subfamily_sc}</code>、<code>{preferred_family_sc}</code>、<code>{version_sc}</code>、<code>{name_sc}</code>、<code>{charset_sc}</code>
+等动态变量；<code>xx</code> 可替换为
+<code>sc</code>/<code>tc</code>/<code>jp</code>/<code>en</code>。</li>
+<li><strong>子家族名隐式规则</strong>：字重 700 →
+<code>Bold</code>，其余 →
+<code>Regular</code>，勾选保存的语言统一写入。</li>
+<li><strong>保存前解析</strong>：未解析的 <code>{...}</code>
+占位符在保存时自动展开为实际文本。</li>
+</ul>
+<h2 id="环境要求">环境要求</h2>
+<ul>
+<li>Windows 10 / 11（64 位）</li>
+<li>Python 3.14+</li>
+<li><a href="https://docs.astral.sh/uv/">uv</a>（开发与发布构建工具链）</li>
+</ul>
+<h2 id="开发运行">开发运行</h2>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> sync          <span class="co"># 安装依赖（fontTools、PySide6、qfluentwidgets）</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run python <span class="at">-B</span> src/main.py</span></code></pre></div>
+<blockquote>
+<p>数据文件
+<code>data/templates.json</code>、<code>data/translations.json</code> 与
+<code>config.json</code> 在开发态存放于仓库根；打包安装后自动改存
+<code>%APPDATA%\FontTuner</code>（安装根不可写时回落），首次运行按默认值自动生成。</p>
+</blockquote>
+<h2 id="发布构建">发布构建</h2>
+<p>一键脚本仿 srw_alpha 的发布方案，走 <strong>Inno Setup 安装器 +
+在线部署</strong>（安装时经 uv 下载 Python
+并同步依赖，安装包小、无需预装 Python）：</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">build.bat</span>        <span class="co"># 即 uv run build/build_release.py</span></span></code></pre></div>
+<p>构建产物（<code>dist/</code>）：</p>
+<ul>
+<li><code>FontTuner-&lt;版本&gt;-x64.zip</code> — 内含 Inno Setup 安装器
+<code>FontTuner-&lt;版本&gt;-x64.exe</code>。</li>
+</ul>
+<p>构建流程（8 步）：清理 dist → 准备 uv 工具链与依赖锁定 → 源码编译为
+<code>.pyc</code> 到 <code>script/</code> → 复制许可/裁剪脚本 → BatToExe
+生成 <code>FontTuner.exe</code> 入口 → ISCC 生成安装器 → 打包 zip →
+清理中间产物。安装时 <code>setup.iss</code>
+内置脚本：<code>uv python install</code> → <code>uv sync</code> →
+<code>trim_venv</code> 瘦身 → UPX
+压缩，并提供下载镜像选择与卸载三选（普通/仅清 venv/完全卸载）。</p>
+<p>所需构建工具（需预先安装）：<code>uv</code>、<a href="https://bat2exe.net/">BatToExe</a>（默认
+<code>C:\Softwares\Bat2Exe\</code>）、<a href="https://jrsoftware.org/isinfo.php">Inno Setup 6</a>（默认
+<code>C:\Softwares\Inno Setup\</code>）、UPX（可选，PATH
+内自动识别）。</p>
+<h2 id="技术栈">技术栈</h2>
+<ul>
+<li><a href="https://doc.qt.io/qtforpython/">PySide6</a>（Qt 6
+GUI）</li>
+<li><a href="https://github.com/zhiyiYo/PySide6-Fluent-Widgets">PySide6-Fluent-Widgets</a>（Fluent
+设计组件）</li>
+<li><a href="https://github.com/fonttools/fonttools">fontTools</a>（字体解析 /
+TTC 打包解包）</li>
+</ul>
+<h2 id="许可">许可</h2>
+<p><a href="LICENSE">GPL-3.0</a> © 2026 拾字 FontTuner</p>

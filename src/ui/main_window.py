@@ -1,9 +1,10 @@
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QIcon
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import MSFluentWindow, MessageBox, NavigationItemPosition
 
 from ui.editor.frame import EditorFrame
 from ui.fontmgr.frame import FontManagerFrame
+from ui.help.frame import HelpFrame
 from ui.package.frame import PackageFrame
 from ui.settings.frame import SettingsFrame
 from ui.signals import app_signals
@@ -15,7 +16,8 @@ class MainWindow(MSFluentWindow):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setWindowTitle("拾字 FontTuner")
-        self.resize(1280, 800)
+        self.setWindowIcon(QIcon(":/icon.png"))
+        self.resize(1440, 720)
         self.setMinimumSize(960, 600)
 
         self.editor_frame = EditorFrame(self)
@@ -23,6 +25,7 @@ class MainWindow(MSFluentWindow):
         self.fontmgr_frame = FontManagerFrame(self)
         self.template_frame = TemplateFrame(self)
         self.translation_frame = TranslationFrame(self)
+        self.help_frame = HelpFrame(self)
         self.settings_frame = SettingsFrame(self)
 
         self.addSubInterface(self.fontmgr_frame, FIF.LIBRARY, "字体管理")
@@ -31,6 +34,8 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.template_frame, FIF.BRUSH, "信息模板")
         self.addSubInterface(self.translation_frame, FIF.FONT, "翻译方案")
         self.addSubInterface(self.settings_frame, FIF.SETTING, "设置",
+                             position=NavigationItemPosition.BOTTOM)
+        self.addSubInterface(self.help_frame, FIF.HELP, "帮助",
                              position=NavigationItemPosition.BOTTOM)
 
         self._dirty = False
@@ -46,6 +51,7 @@ class MainWindow(MSFluentWindow):
     def reset_style(self):
         """主题切换后刷新所有控件的自定义样式。"""
         self.editor_frame.reset_style()
+        self.help_frame.reset_style()
 
     def closeEvent(self, e: QCloseEvent):
         if self._dirty:

@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="splash.png">splash_embed.png</file>
+        <file alias="icon.png">icon_embed.png</file>
+        <file>html/help.html</file>
+    </qresource>
+</RCC>
