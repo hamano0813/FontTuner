@@ -125,7 +125,7 @@ class PackageFrame(QFrame):
         dir_row.addWidget(browse)
         v.addLayout(dir_row)
 
-        name_hint = CaptionLabel("输出以字体内名称命名（家族名-字重），重名自动加序号。", panel)
+        name_hint = CaptionLabel("输出以字体内部名称（家族名-字重）命名，重名时自动追加序号。", panel)
         v.addWidget(name_hint)
 
         run_row = QHBoxLayout()
@@ -206,13 +206,13 @@ class PackageFrame(QFrame):
 
     def _on_unpack_finished(self, outputs, errors):
         if errors:
-            InfoBar.error("解包完成（有失败）", f"{len(errors)} 个子字体失败：{errors[0][0]}",
+            InfoBar.error("解包完成（部分失败）", f"{len(errors)} 个子字体解包失败：{errors[0][0]}",
                           parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
         if outputs:
             InfoBar.success("解包完成", f"已输出 {len(outputs)} 个文件到 {os.path.dirname(outputs[0])}",
                             parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
         if not outputs and not errors:
-            InfoBar.warning("没有输出", "勾选的子字体为空或已全部失败。", parent=self.window(),
+            InfoBar.warning("没有输出", "勾选的子字体为空，或已全部失败。", parent=self.window(),
                             position=InfoBarPosition.TOP, duration=3000)
 
     # ---------------------------------------------------------------- 打包面板
@@ -304,7 +304,7 @@ class PackageFrame(QFrame):
             InfoBar.success("打包完成", os.path.basename(out_path),
                             parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
         if errors:
-            InfoBar.error("打包有失败", f"{len(errors)} 个文件失败：{errors[0][0]}",
+            InfoBar.error("打包完成（部分失败）", f"{len(errors)} 个文件打包失败：{errors[0][0]}",
                           parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
 
     # ---------------------------------------------------------------- 公共

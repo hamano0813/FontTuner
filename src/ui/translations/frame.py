@@ -116,7 +116,7 @@ class TranslationFrame(QFrame):
 
         self.title = SubtitleLabel("字重/字宽/斜体翻译", self)
         self.hint = CaptionLabel(
-            "标签用于子家族名自动生成与模板 {weight}/{width}/{italic} 占位符；保存后对已加载字体立即生效。", self)
+            "标签用于子家族名自动生成及模板占位符 {weight}/{width}/{italic}；保存后对已加载字体立即生效。", self)
 
         self.segmented = SegmentedWidget(self)
         self.stack = QStackedWidget(self)

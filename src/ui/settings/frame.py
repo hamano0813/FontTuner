@@ -1,8 +1,8 @@
 """设置页：SettingCard 自然叠放；重命名模板用 ExpandGroupSettingCard 手风琴卡。"""
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QTextOption
-from PySide6.QtWidgets import QFrame, QGridLayout, QSpacerItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel,
     ExpandGroupSettingCard,
@@ -12,6 +12,7 @@ from qfluentwidgets import (
     PlainTextEdit,
     ScrollArea,
     SettingCard,
+    SpinBox,
     Theme,
     qconfig,
     setTheme,
@@ -66,44 +67,49 @@ class RenameTemplateCard(ExpandGroupSettingCard):
         self.addGroupWidget(table)
 
 
-class PreviewTextCard(SettingCard):
-    """预览文字设置卡：右侧多行编辑框，绑定 option.preview_sample。
+class PreviewTextCard(ExpandGroupSettingCard):
+    """预览设置卡（下拉式）：头部左侧是预览字号 spinbox，展开显示预览文字编辑框。
 
-    编辑页与字体管理页的预览共用这段文字（一行一种语言），改动经 valueChanged 即时重绘。
+    编辑页与字体管理页的预览共用这段文字（一行一种语言），字号/文字改动经
+    option 的 valueChanged 即时重绘。
     """
 
     def __init__(self, parent=None):
         super().__init__(
             FIF.EDIT, "预览文字",
-            "字体编辑页与字体管理页的预览共用这段文字，一行一种语言（简/繁/日/英）。",
+            "字体编辑页与字体管理页的预览共用这段文字。",
             parent,
         )
-        # 放开 SettingCard 默认固定高度，让卡片随编辑区增高
-        self.setMinimumHeight(0)
-        self.setMaximumHeight(16777215)
+        # 头部：下拉按钮左侧的预览字号 spinbox
+        self.size_spin = SpinBox(self)
+        self.size_spin.setRange(8, 72)
+        self.size_spin.setValue(option.preview_font_size.value)
+        self.size_spin.setToolTip("预览字号（pt）")
+        self.size_spin.valueChanged.connect(self._on_size_changed)
+        self.addWidget(self.size_spin)
 
+        # 展开区：预览文字编辑框
         self.edit = PlainTextEdit(self)
         self.edit.setPlainText(option.preview_sample.value)
-        self.edit.setPlaceholderText("一行一种语言（简/繁/日/英）…")
+        self.edit.setPlaceholderText("输入预览文字，可多行换行…")
         self.edit.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
-        self.edit.setMaximumHeight(120)
+        self.edit.setFixedHeight(120)
+        self.edit.setMinimumWidth(300)
 
         # 防抖持久化：停止输入 600ms 后写回配置
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(600)
-        self._save_timer.timeout.connect(self._persist)
+        self._save_timer.timeout.connect(self._persist_sample)
         self.edit.textChanged.connect(lambda: self._save_timer.start())
 
-        # 移除父 hBox 末尾的 stretch，让编辑区独占剩余宽度
-        for i in range(self.hBoxLayout.count()):
-            if isinstance(self.hBoxLayout.itemAt(i), QSpacerItem):
-                self.hBoxLayout.removeItem(self.hBoxLayout.itemAt(i))
-                break
-        self.hBoxLayout.addWidget(self.edit, 1, Qt.AlignmentFlag.AlignVCenter)
+        self.addGroupWidget(self.edit)
 
-    def _persist(self) -> None:
+    def _persist_sample(self) -> None:
         qconfig.set(option.preview_sample, self.edit.toPlainText())
+
+    def _on_size_changed(self, value: int) -> None:
+        qconfig.set(option.preview_font_size, value)
 
 
 class SettingsFrame(QFrame):
@@ -130,7 +136,7 @@ class SettingsFrame(QFrame):
         # ===== 关于 =====
         self.about_card = SettingCard(
             FIF.INFO, "FontTuner",
-            "批量编辑字体元数据：字重/字宽/斜体、四语种名称及版权许可厂商记录。支持 .ttf/.otf/.ttc/.otc。",
+            "批量编辑字体元数据：字重/字宽/斜体、多语言名称及版权、许可、厂商等信息。支持 .ttf/.otf/.ttc/.otc。",
             self,
         )
         self.copyright_card = SettingCard(

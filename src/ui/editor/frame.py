@@ -3,7 +3,7 @@
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QFrame, QGridLayout, QHBoxLayout, QSplitter, QVBoxLayout
+from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QSplitter, QVBoxLayout
 from qfluentwidgets import (
     Action,
     CommandBar,
@@ -120,13 +120,12 @@ class EditorFrame(QFrame):
         self.splitter.setChildrenCollapsible(False)  # 拖到尽头不会把预览/表格折叠没了
         self._style_splitter()
 
-        # 顶部网格：左列两行控件（CommandBar / 简繁日英+开关）；预览文字改由设置页配置
-        top = QGridLayout()
+        # 顶部单行：功能按钮（CommandBar）+ 语言/字段开关（预览文字已移入设置页，两行合并为一行）
+        top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
-        top.setHorizontalSpacing(16)
-        top.addWidget(self.cmd_bar, 0, 0)
-        top.addLayout(self.controls_row, 1, 0)
-        top.setColumnStretch(0, 1)
+        top.setSpacing(16)
+        top.addWidget(self.cmd_bar)
+        top.addLayout(self.controls_row, 1)
 
         self.progress = ProgressBar(self)
         self.progress.setVisible(False)
@@ -273,7 +272,7 @@ class EditorFrame(QFrame):
         self.model.set_entries(entries)
         app_signals.fonts_loaded.emit()
         if errors:
-            InfoBar.error("部分文件加载失败", f"{len(errors)} 个文件出错：{errors[0][0]}",
+            InfoBar.error("部分文件加载失败", f"{len(errors)} 个文件加载失败：{errors[0][0]}",
                           parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
         if entries:
             self.table.setCurrentIndex(self.model.index(0, 0))
@@ -315,7 +314,7 @@ class EditorFrame(QFrame):
 
     def _on_save_finished(self, errors):
         if errors:
-            InfoBar.error("保存完成（有失败）", f"{len(errors)} 个文件失败：{errors[0][0]}",
+            InfoBar.error("保存完成（部分失败）", f"{len(errors)} 个文件保存失败：{errors[0][0]}",
                           parent=self.window(), position=InfoBarPosition.TOP, duration=5000)
         else:
             InfoBar.success("保存成功", "全部字体已写回。", parent=self.window(),
@@ -376,7 +375,7 @@ class EditorFrame(QFrame):
             total += resolve_entry_placeholders(e)
         self.model.set_entries(entries)  # 刷新表格显示解析后的文本
         if total:
-            self.status_label.setText(f"已解析 {total} 个字段的占位符")
+            self.status_label.setText(f"已解析 {total} 个字段中的占位符")
             app_signals.project_edited.emit()
         else:
             self.status_label.setText("没有可解析的占位符")
@@ -399,12 +398,12 @@ class EditorFrame(QFrame):
         self.model.set_entries(entries)  # 刷新表格显示新文件名
         parts = [f"重命名 {renamed} 个文件"]
         if skipped:
-            parts.append(f"跳过 {skipped} 个")
+            parts.append(f"跳过 {skipped} 个文件")
         if errors:
-            parts.append(f"失败 {len(errors)} 个")
+            parts.append(f"失败 {len(errors)} 个文件")
         self.status_label.setText("，".join(parts))
         if errors:
-            InfoBar.error("重命名完成（有失败）", f"{len(errors)} 个文件失败：{errors[0][0]}",
+            InfoBar.error("重命名完成（部分失败）", f"{len(errors)} 个文件重命名失败：{errors[0][0]}",
                           parent=self.window(), position=InfoBarPosition.TOP, duration=5000)
         elif renamed:
             InfoBar.success("重命名完成", f"已重命名 {renamed} 个文件。",

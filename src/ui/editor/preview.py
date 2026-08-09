@@ -2,15 +2,15 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontDatabase
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
-from qfluentwidgets import SpinBox, SubtitleLabel, isDarkTheme, qconfig
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from qfluentwidgets import isDarkTheme, qconfig
 
 from config import option
 from core.models import FontEntry
 
 
 class FontPreviewWidget(QWidget):
-    """选中字体行的预览面板。TTC/OTC 按子字体序号取对应字面。"""
+    """选中字体行的预览面板：只渲染预览文字（设置页配置），无标题/无字号控件。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -20,19 +20,7 @@ class FontPreviewWidget(QWidget):
         self._italic = False
         self._weight = 400
 
-        self.title = SubtitleLabel("—", self)
-        # 防止标题在网格里被拉伸到整行高度（Preferred 垂直策略会被撑满）
-        self.title.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-
-        # 预览字号 spinbox：标题右侧右对齐，改字号即时重绘并持久化
-        self._preview_size = option.preview_font_size.value
-        self.size_spin = SpinBox(self)
-        self.size_spin.setRange(8, 72)
-        self.size_spin.setValue(self._preview_size)
-        self.size_spin.setToolTip("预览字号（点）")
-        self.size_spin.valueChanged.connect(self._on_size_changed)
-
-        # 预览渲染区：字体名 label 下方铺满
+        # 预览渲染区：铺满
         self.preview_label = QLabel(self)
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.preview_label.setWordWrap(True)
@@ -40,16 +28,13 @@ class FontPreviewWidget(QWidget):
         self._apply_theme_color()
 
         layout = QVBoxLayout(self)
-        size_row = QHBoxLayout()
-        size_row.addWidget(self.title)
-        size_row.addStretch(1)
-        size_row.addWidget(self.size_spin)
-        layout.addLayout(size_row)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.preview_label, 1)
         self.setLayout(layout)
 
-        # 预览文字来自设置页的 option.preview_sample，改动时即时重绘
+        # 预览文字/字号由设置页的 option 配置，改动时即时重绘
         option.preview_sample.valueChanged.connect(self._render)
+        option.preview_font_size.valueChanged.connect(self._render)
 
     def set_font(self, entry: FontEntry | None) -> None:
         """切换预览目标字体；None 表示清空。"""
@@ -57,14 +42,12 @@ class FontPreviewWidget(QWidget):
             self._clear()
             return
         family = self._family_for(entry)
-        self.title.setText(entry.display_name())
         self._family = family
         self._italic = entry.italic()
         self._weight = entry.us_weight_class
         self._render()
 
     def _clear(self) -> None:
-        self.title.setText("—")
         self.preview_label.setText("（选择一行字体预览）")
         self._family = None
         self._italic = False
@@ -112,18 +95,13 @@ class FontPreviewWidget(QWidget):
     def _render(self) -> None:
         self._apply_theme_color()
         text = option.preview_sample.value or " "
+        size = option.preview_font_size.value
         if self._family is None:
-            self.preview_label.setFont(QFont("Microsoft YaHei UI", self._preview_size))
+            self.preview_label.setFont(QFont("Microsoft YaHei UI", size))
             self.preview_label.setText("（该字体无法预览）" if text != " " else "")
             return
-        font = QFont(self._family, self._preview_size)
+        font = QFont(self._family, size)
         font.setWeight(QFont.Weight(self._weight))  # usWeightClass(100-900) ≈ QFont.Weight
         font.setItalic(self._italic)
         self.preview_label.setFont(font)
         self.preview_label.setText(text)
-
-    def _on_size_changed(self, value: int) -> None:
-        """预览字号变更：重绘并立即写回配置。"""
-        self._preview_size = value
-        qconfig.set(option.preview_font_size, value)
-        self._render()

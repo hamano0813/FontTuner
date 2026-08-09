@@ -42,7 +42,7 @@ class FontManagerFrame(QFrame):
 
         self.title = SubtitleLabel("字体管理", self)
         self.hint = CaptionLabel(
-            "勾选文件夹里的字体即注册到 Windows（会话级，重启失效）；取消勾选即注销。系统已装字体会被标记。", self)
+            "勾选字体即注册到 Windows（当前会话有效，重启后失效）；取消勾选即注销。系统已安装的字体将被标记。", self)
 
         self.btn_add = PushButton(FIF.FOLDER_ADD, "选择文件夹", self)
         self.btn_add.clicked.connect(self._on_add_folder)
@@ -51,17 +51,17 @@ class FontManagerFrame(QFrame):
 
         self.tree = TreeWidget(self)
         self.tree.setColumnCount(1)
-        self.tree.setHeaderLabels(["字体文件（勾选 = 注册到 Windows）"])
+        self.tree.setHeaderLabels(["字体文件（勾选即注册到 Windows）"])
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.currentItemChanged.connect(self._on_current_item_changed)
 
         # 底部预览：4 行（简/繁/日/英），用选中字体渲染 option.preview_sample
-        self.preview_title = CaptionLabel("预览（简 / 繁 / 日 / 英）", self)
+        self.preview_title = CaptionLabel("预览", self)
         self.preview_label = QLabel(self)
         self.preview_label.setWordWrap(True)
         self.preview_label.setMinimumHeight(52)
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.preview_label.setText("（在树中选择一个字体预览）")
+        self.preview_label.setText("（请在树中选择要预览的字体）")
         self._preview_family: str | None = None
         self._preview_font_id: int | None = None
         option.preview_sample.valueChanged.connect(self._render_preview)
@@ -127,7 +127,7 @@ class FontManagerFrame(QFrame):
         for node in tree:
             self.tree.addTopLevelItem(self._build_item(node))
         self.tree.blockSignals(False)
-        self.status_label.setText(f"已加载 {len(tree)} 个文件夹，勾选字体即注册到 Windows。")
+        self.status_label.setText(f"已加载 {len(tree)} 个文件夹，勾选字体即可注册到 Windows。")
         if errors:
             InfoBar.error("部分文件夹扫描失败", f"{len(errors)} 个文件夹：{errors[0][0]}",
                           parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
@@ -151,7 +151,7 @@ class FontManagerFrame(QFrame):
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             if node["is_font"]:
                 # 系统已装：灰显标记，避免误卸系统字体
-                item.setText(0, f"{node['name']}（系统已装）")
+                item.setText(0, f"{node['name']}（系统已安装）")
                 item.setForeground(0, QColor("#8a8a8a"))
                 item.setToolTip(0, f"{node['family'] or node['name']} — 已由系统安装，无需注册")
         for child in node.get("children", []):
@@ -190,7 +190,7 @@ class FontManagerFrame(QFrame):
         self._update_status()
 
     def _update_status(self) -> None:
-        self.status_label.setText(f"已注册 {len(self._registered)} 个字体（会话级，重启失效）")
+        self.status_label.setText(f"已注册 {len(self._registered)} 个字体（当前会话有效，重启后失效）")
 
     # ---------------------------------------------------------------- 底部预览
 
@@ -236,4 +236,4 @@ class FontManagerFrame(QFrame):
             QFontDatabase.removeApplicationFont(self._preview_font_id)
             self._preview_font_id = None
         self._preview_family = None
-        self.preview_label.setText("（在树中选择一个字体预览）")
+        self.preview_label.setText("（请在树中选择要预览的字体）")
