@@ -1,13 +1,15 @@
 """设置页：SettingCard 自然叠放；重命名模板用 ExpandGroupSettingCard 手风琴卡。"""
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QGridLayout, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QTextOption
+from PySide6.QtWidgets import QFrame, QGridLayout, QSpacerItem, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel,
     ExpandGroupSettingCard,
     FluentIcon as FIF,
     LineEdit,
     OptionsSettingCard,
+    PlainTextEdit,
     ScrollArea,
     SettingCard,
     Theme,
@@ -64,6 +66,46 @@ class RenameTemplateCard(ExpandGroupSettingCard):
         self.addGroupWidget(table)
 
 
+class PreviewTextCard(SettingCard):
+    """预览文字设置卡：右侧多行编辑框，绑定 option.preview_sample。
+
+    编辑页与字体管理页的预览共用这段文字（一行一种语言），改动经 valueChanged 即时重绘。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(
+            FIF.EDIT, "预览文字",
+            "字体编辑页与字体管理页的预览共用这段文字，一行一种语言（简/繁/日/英）。",
+            parent,
+        )
+        # 放开 SettingCard 默认固定高度，让卡片随编辑区增高
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
+
+        self.edit = PlainTextEdit(self)
+        self.edit.setPlainText(option.preview_sample.value)
+        self.edit.setPlaceholderText("一行一种语言（简/繁/日/英）…")
+        self.edit.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        self.edit.setMaximumHeight(120)
+
+        # 防抖持久化：停止输入 600ms 后写回配置
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(600)
+        self._save_timer.timeout.connect(self._persist)
+        self.edit.textChanged.connect(lambda: self._save_timer.start())
+
+        # 移除父 hBox 末尾的 stretch，让编辑区独占剩余宽度
+        for i in range(self.hBoxLayout.count()):
+            if isinstance(self.hBoxLayout.itemAt(i), QSpacerItem):
+                self.hBoxLayout.removeItem(self.hBoxLayout.itemAt(i))
+                break
+        self.hBoxLayout.addWidget(self.edit, 1, Qt.AlignmentFlag.AlignVCenter)
+
+    def _persist(self) -> None:
+        qconfig.set(option.preview_sample, self.edit.toPlainText())
+
+
 class SettingsFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -82,6 +124,9 @@ class SettingsFrame(QFrame):
         # ===== 重命名模板（手风琴卡）=====
         self.rename_card = RenameTemplateCard(self)
 
+        # ===== 预览文字 =====
+        self.preview_text_card = PreviewTextCard(self)
+
         # ===== 关于 =====
         self.about_card = SettingCard(
             FIF.INFO, "FontTuner",
@@ -96,6 +141,7 @@ class SettingsFrame(QFrame):
         sub_layout = QVBoxLayout()
         sub_layout.addWidget(self.theme_card)
         sub_layout.addWidget(self.rename_card)
+        sub_layout.addWidget(self.preview_text_card)
         sub_layout.addWidget(self.about_card)
         sub_layout.addWidget(self.copyright_card)
         sub_layout.addStretch()

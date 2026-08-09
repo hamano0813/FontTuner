@@ -120,15 +120,13 @@ class EditorFrame(QFrame):
         self.splitter.setChildrenCollapsible(False)  # 拖到尽头不会把预览/表格折叠没了
         self._style_splitter()
 
-        # 顶部网格：左列两行控件（CommandBar / 简繁日英+开关），右侧预览输入框跨两行
+        # 顶部网格：左列两行控件（CommandBar / 简繁日英+开关）；预览文字改由设置页配置
         top = QGridLayout()
         top.setContentsMargins(0, 0, 0, 0)
         top.setHorizontalSpacing(16)
         top.addWidget(self.cmd_bar, 0, 0)
         top.addLayout(self.controls_row, 1, 0)
-        top.addWidget(self.preview.sample_input, 0, 1, 2, 1)
         top.setColumnStretch(0, 1)
-        top.setColumnStretch(1, 0)  # 输入框列固定宽
 
         self.progress = ProgressBar(self)
         self.progress.setVisible(False)

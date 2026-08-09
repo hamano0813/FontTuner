@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QListWidgetItem,
     QStackedWidget,
-    QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -34,6 +33,7 @@ from qfluentwidgets import (
     PushButton,
     SegmentedWidget,
     SubtitleLabel,
+    TreeWidget,
     qconfig,
 )
 
@@ -109,7 +109,7 @@ class PackageFrame(QFrame):
         top.addStretch(1)
         v.addLayout(top)
 
-        self.unpack_tree = QTreeWidget(panel)
+        self.unpack_tree = TreeWidget(panel)
         self.unpack_tree.setColumnCount(1)
         self.unpack_tree.setHeaderLabels(["集合文件 → 子字体"])
         self.unpack_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
