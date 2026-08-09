@@ -48,6 +48,8 @@ Source: "pyproject.toml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "uv.lock"; DestDir: "{app}"; Flags: ignoreversion
 Source: "upx.exe"; DestDir: "{app}"; Flags: ignoreversion deleteafterinstall
 Source: "upx.1"; DestDir: "{app}"; Flags: ignoreversion deleteafterinstall
+Source: "update.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "version"; DestDir: "{app}"; Flags: ignoreversion
 Source: "trim_venv.py"; DestDir: "{app}"; Flags: ignoreversion deleteafterinstall
 Source: "script\*"; DestDir: "{app}\script"; Flags: ignoreversion recursesubdirs createallsubdirs
 

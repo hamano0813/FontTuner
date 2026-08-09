@@ -5,3 +5,6 @@ __pycache__
 config.json
 data/
 dist/
+fonts/
+*.ttc
+*.otc

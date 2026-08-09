@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import MSFluentWindow, MessageBox, NavigationItemPosition, SplashScreen
 
+from core.updater import read_version
 from ui.editor.frame import EditorFrame
 from ui.fontmgr.frame import FontManagerFrame
 from ui.help.frame import HelpFrame
@@ -12,12 +13,14 @@ from ui.settings.frame import SettingsFrame
 from ui.signals import app_signals
 from ui.templates.frame import TemplateFrame
 from ui.translations.frame import TranslationFrame
+from ui.tray import TrayIcon
 
 
 class MainWindow(MSFluentWindow):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.setWindowTitle("拾字 FontTuner")
+        ver = read_version()
+        self.setWindowTitle("拾字 FontTuner" if not ver else f"拾字 FontTuner v{ver}")
         self.setWindowIcon(QIcon(":/icon.png"))
         self.resize(1440, 720)
         self.setMinimumSize(960, 600)
@@ -32,6 +35,9 @@ class MainWindow(MSFluentWindow):
         self.splash.setIconSize(size)
 
         self._dirty = False
+        self._quitting = False          # 托盘「退出」放行标志：True 时才允许真正关闭
+        self._tray_notified = False     # 首次最小化到托盘的提示只弹一次
+        self.tray: TrayIcon | None = None
         app_signals.project_edited.connect(self._mark_dirty)
         app_signals.project_saved.connect(self._clear_dirty)
 
@@ -62,6 +68,9 @@ class MainWindow(MSFluentWindow):
 
         self.splash.finish()
 
+        # 常驻托盘图标：关闭窗口只最小化到托盘，托盘菜单「退出」才真正退出
+        self.tray = TrayIcon(self)
+
     def _mark_dirty(self):
         self._dirty = True
 
@@ -88,12 +97,36 @@ class MainWindow(MSFluentWindow):
         self.editor_frame.reset_style()
         self.help_frame.reset_style()
 
+    def _request_quit(self):
+        """托盘菜单「退出」：置放行标志后 close()，由 closeEvent 处理未保存再真正退出。"""
+        self._quitting = True
+        self.close()
+
     def closeEvent(self, e: QCloseEvent):
-        if self._dirty:
-            box = MessageBox("未保存的修改", "有修改尚未保存，确定退出吗？", self)
-            box.yesButton.setText("退出")
-            box.cancelButton.setText("取消")
-            if not box.exec():
-                e.ignore()
-                return
-        super().closeEvent(e)
+        if self._quitting:
+            # 真正退出：先处理未保存，确认后才放行（取消则恢复标志并保持运行）
+            if self._dirty:
+                box = MessageBox("未保存的修改", "有修改尚未保存，确定退出吗？", self)
+                box.yesButton.setText("退出")
+                box.cancelButton.setText("取消")
+                if not box.exec():
+                    self._quitting = False
+                    e.ignore()
+                    return
+            super().closeEvent(e)
+            return
+
+        if self.tray is None:
+            # 托盘尚未就绪（极端时序），保持直接关闭
+            super().closeEvent(e)
+            return
+
+        # 点关闭按钮 → 最小化到托盘，程序仍在运行
+        e.ignore()
+        self.hide()
+        if not self._tray_notified:
+            self._tray_notified = True
+            self.tray.notify(
+                "拾字 FontTuner",
+                "程序仍在运行，点击托盘图标可重新打开，右键菜单可退出。",
+            )

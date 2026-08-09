@@ -249,6 +249,8 @@ class PackageFrame(QFrame):
         grid.addWidget(BodyLabel("文件名", panel), 1, 0)
         self.pack_name = LineEdit(panel)
         self.pack_name.setText("collection")
+        self._pack_name_manual = False
+        self.pack_name.textEdited.connect(lambda: setattr(self, "_pack_name_manual", True))
         grid.addWidget(self.pack_name, 1, 1)
 
         grid.addWidget(BodyLabel("格式", panel), 2, 0)
@@ -279,10 +281,19 @@ class PackageFrame(QFrame):
             if path not in existing:
                 self.pack_list.addItem(QListWidgetItem(path))
                 existing.add(path)
+        self._update_pack_name_default()
 
     def _on_pack_remove(self):
         for item in self.pack_list.selectedItems():
             self.pack_list.takeItem(self.pack_list.row(item))
+        self._update_pack_name_default()
+
+    def _update_pack_name_default(self) -> None:
+        """按所选字体中 Regular 的家族名刷新默认文件名（用户手改后不再覆盖）。"""
+        if self._pack_name_manual:
+            return
+        files = [self.pack_list.item(i).text() for i in range(self.pack_list.count())]
+        self.pack_name.setText(package.recommend_pack_name(files) or "collection")
 
     def _run_pack(self):
         files = [self.pack_list.item(i).text() for i in range(self.pack_list.count())]
@@ -303,6 +314,10 @@ class PackageFrame(QFrame):
         if out_path:
             InfoBar.success("打包完成", os.path.basename(out_path),
                             parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+            # 打包成功：清除已选字体列表，文件名恢复默认（未手改标记），下一轮直接开始
+            self.pack_list.clear()
+            self._pack_name_manual = False
+            self._update_pack_name_default()
         if errors:
             InfoBar.error("打包完成（部分失败）", f"{len(errors)} 个文件打包失败：{errors[0][0]}",
                           parent=self.window(), position=InfoBarPosition.TOP, duration=4000)

@@ -14,6 +14,8 @@ from typing import Callable, Iterable
 
 from fontTools.ttLib import TTCollection, TTFont
 
+from core import mapping
+
 COLLECTION_EXTENSIONS = (".ttc", ".otc")
 FONT_EXTENSIONS = (".ttf", ".otf")
 
@@ -125,6 +127,75 @@ def unpack_fonts(jobs: Iterable[tuple[str, list[int]]], out_dir: str,
         if progress:
             progress(i + 1, total)
     return outputs, errors
+
+
+# 家族名语言优先级：简 > 繁 > 日 > 英（与重命名模板的首选家族名旧占位符一致）
+_FAMILY_NAME_PRIORITY = ("SC", "TC", "JA", "EN")
+
+
+def _family_name_per_lang(font) -> dict[str, str]:
+    """按逻辑语言提取家族名（nameID 16 优先，回退 1）；无记录的语言不出现在结果中。
+
+    记录组解析复用 mapping 的读取优先级（Windows 组优先，其次 Mac/Unicode 镜像），
+    与编辑器读名保持一致。
+    """
+    families: dict[str, str] = {}
+    name = font["name"]
+    for group in mapping._READ_PRIORITY:
+        lang = mapping._group_lang(group)
+        if lang is None or lang in families:
+            continue
+        for name_id in (16, 1):
+            rec = name.getName(name_id, *group)
+            if rec is None:
+                continue
+            value = rec.toUnicode().strip()
+            if value:
+                families[lang] = value
+                break
+    return families
+
+
+def recommend_pack_name(srcs: Iterable[str]) -> str | None:
+    """推荐打包默认文件名：取 Regular（字重 400 且非斜体）字体的家族名。
+
+    家族名按语言优先级 简>繁>日>英 取首个非空；无 Regular 时回退首个成功读取字体
+    的同优先级家族名；全部读取失败返回 None。返回名已清洗非法文件名字符。
+    注意：必须 close 字体，否则 Windows 锁住源文件。
+    """
+    regular_name: str | None = None
+    fallback: str | None = None
+    for path in srcs:
+        try:
+            font = TTFont(path, lazy=True)
+        except Exception:
+            continue
+        try:
+            families = _family_name_per_lang(font)
+            family = next(
+                (families[lang] for lang in _FAMILY_NAME_PRIORITY if families.get(lang)),
+                None,
+            )
+            if not family:
+                continue
+            if fallback is None:
+                fallback = family
+            try:
+                os2 = font["OS/2"]
+                regular = int(os2.usWeightClass) == 400 and not bool(os2.fsSelection & 1)
+            except Exception:
+                regular = False
+            if regular:
+                regular_name = family
+                break
+        finally:
+            font.close()
+    name = regular_name or fallback
+    if not name:
+        return None
+    name = _ILLEGAL.sub("", name)
+    name = re.sub(r"\s+", " ", name).strip(" .")
+    return name or None
 
 
 def _collection_sort_key(font) -> tuple:

@@ -7,19 +7,24 @@ from qfluentwidgets import (
     CaptionLabel,
     ExpandGroupSettingCard,
     FluentIcon as FIF,
+    InfoBar,
+    InfoBarPosition,
     LineEdit,
     OptionsSettingCard,
     PlainTextEdit,
     ScrollArea,
     SettingCard,
     SpinBox,
+    SwitchSettingCard,
     Theme,
     qconfig,
     setTheme,
 )
 
 from config import option
+from core import autostart
 from core.font_service import RENAME_PLACEHOLDERS
+from ui.settings.update_card import UpdateCard
 
 
 class RenameTemplateCard(ExpandGroupSettingCard):
@@ -118,6 +123,13 @@ class SettingsFrame(QFrame):
         self.setObjectName("SettingsFrame")
         self.sub_frame = QFrame(self)
 
+        # ===== 启动 =====
+        self.autostart_card = SwitchSettingCard(
+            FIF.POWER_BUTTON, "开机自动启动", "开机时自动启动拾字 FontTuner", parent=self,
+        )
+        self.autostart_card.setChecked(autostart.is_enabled())
+        self.autostart_card.checkedChanged.connect(self._on_autostart_toggled)
+
         # ===== 界面设置 =====
         self.theme_card = OptionsSettingCard(
             option.themeMode, FIF.PALETTE, "主题模式", "更改界面显示颜色",
@@ -140,17 +152,18 @@ class SettingsFrame(QFrame):
             "注册字体到 Windows；并提供信息模板、跨语言翻译与多语言预览。支持 .ttf/.otf/.ttc/.otc。",
             self,
         )
-        self.copyright_card = SettingCard(
-            FIF.COPY, "版权信息", "© 2026 拾字 FontTuner · 保留所有权利", self,
-        )
+
+        # ===== 版权信息（含检查更新）=====
+        self.update_card = UpdateCard(self)
 
         # 无分组标题、无说明 label：SettingCard 自然叠放
         sub_layout = QVBoxLayout()
+        sub_layout.addWidget(self.autostart_card)
         sub_layout.addWidget(self.theme_card)
         sub_layout.addWidget(self.rename_card)
         sub_layout.addWidget(self.preview_text_card)
         sub_layout.addWidget(self.about_card)
-        sub_layout.addWidget(self.copyright_card)
+        sub_layout.addWidget(self.update_card)
         sub_layout.addStretch()
         self.sub_frame.setLayout(sub_layout)
 
@@ -163,6 +176,29 @@ class SettingsFrame(QFrame):
         layout.addWidget(self.scroll_area)
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
+
+    def _on_autostart_toggled(self, checked: bool) -> None:
+        """开机自启开关：写入/删除 HKCU Run 键（指向引导 exe）。
+
+        开发态没有引导 exe（FontTuner.exe），enable 失败 → 回弹开关并提示。
+        注意：回弹用 setChecked(False) 会再触发 checkedChanged(False) → disable()，
+        幂等无害，不会死循环。
+        """
+        if checked:
+            if not autostart.enable():
+                self.autostart_card.setChecked(False)
+                InfoBar.error(
+                    title="开机自动启动",
+                    content="仅安装版支持开机自启（未找到引导程序 FontTuner.exe）。",
+                    parent=self.window(), position=InfoBarPosition.TOP, duration=4000,
+                )
+        else:
+            if not autostart.disable():
+                InfoBar.error(
+                    title="开机自动启动",
+                    content="无法写入注册表，请检查系统权限。",
+                    parent=self.window(), position=InfoBarPosition.TOP, duration=4000,
+                )
 
     def theme_changed(self, theme: Theme) -> None:
         """主题切换：应用主题并刷新所有控件的自定义样式（VAS 模式）。"""

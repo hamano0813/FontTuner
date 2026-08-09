@@ -4,6 +4,11 @@
 dist/ 最终只保留发布产物。分发模型为「源码编译为 .pyc + uv 工具链」，由 Inno Setup
 安装器在安装时在线装 Python 与依赖（安装包小，安装需联网）。
 
+产物为两个 zip：
+  - FontTuner-{version}-x64.zip   安装程序（内含 update.exe 与 version）
+  - v{version}.zip                升级包（script/*.pyc + FontTuner.exe + version，
+                                   由 update.exe 或设置页「检查更新」应用）
+
 用法:
     cd 项目根目录
     uv run build/build_release.py
@@ -104,10 +109,10 @@ def find_version() -> str:
     return m.group(1)
 
 
-# ======================== STEP 1/8: 清理 ========================
+# ======================== STEP 1/9: 清理 ========================
 
 def step_clean():
-    step("1/8", "清理构建目录")
+    step("1/9", "清理构建目录")
     if DIST_DIR.exists():
         shutil.rmtree(DIST_DIR)
     DIST_DIR.mkdir(parents=True)
@@ -115,11 +120,11 @@ def step_clean():
     ok("dist/ 已清理")
 
 
-# ======================== STEP 2/8: UV 工具链 ========================
+# ======================== STEP 2/9: UV 工具链 ========================
 
 def step_uv():
     """升级 uv、锁定依赖、复制 uv 工具链到 dist（供安装器在线部署）"""
-    step("2/8", "准备 UV 工具链与依赖锁定")
+    step("2/9", "准备 UV 工具链与依赖锁定")
 
     run(["uv", "self", "update"], check=False)
     run(["uv", "lock", "--upgrade"], check=False)
@@ -142,11 +147,11 @@ def step_uv():
             ok(f)
 
 
-# ======================== STEP 3/8: Python 编译为 .pyc ========================
+# ======================== STEP 3/9: Python 编译为 .pyc ========================
 
 def step_python_compile():
     """把 src/ 下源码编译为 .pyc 放到 dist/script/（含包结构）"""
-    step("3/8", "编译 Python 源码")
+    step("3/9", "编译 Python 源码")
     import py_compile
 
     src_root = PROJECT_ROOT / "src"
@@ -182,10 +187,17 @@ def step_python_compile():
     log(f"Python 编译完成 → {SCRIPT_DIR}")
 
 
-# ======================== STEP 4/8: 复制额外资源 ========================
+# ======================== STEP 4/9: 复制额外资源 ========================
 
 def step_assets():
-    step("4/8", "复制额外资源")
+    step("4/9", "复制额外资源")
+
+    # version 文件：以 pyproject.toml 为唯一权威，构建时同步仓库根（开发态显示/比对用）
+    # 并生成 dist/version（升级包/安装器共用，装入 {app} 供版本比对）
+    version = find_version()
+    PROJECT_ROOT.joinpath("version").write_text(version, encoding="utf-8")
+    DIST_DIR.joinpath("version").write_text(version, encoding="utf-8")
+    ok("version")
 
     for asset in ("LICENSE", "README.md"):
         src = PROJECT_ROOT / asset
@@ -212,11 +224,11 @@ def step_assets():
         warn("UPX 未找到，跳过压缩工具复制（安装时 UPX 步骤将被跳过）")
 
 
-# ======================== STEP 5/8: 生成 EXE 入口 ========================
+# ======================== STEP 5/9: 生成 EXE 入口 ========================
 
 def step_entry_point():
     """把 main.bat 编译为 FontTuner.exe（BatToExe）"""
-    step("5/8", "生成程序入口")
+    step("5/9", "生成程序入口")
 
     if not os.path.exists(BAT2EXE):
         warn(f"BatToExeConverter 未找到: {BAT2EXE}，跳过 exe 生成")
@@ -261,11 +273,40 @@ def step_entry_point():
     ok(f"{APP_NAME}.exe (v{version})")
 
 
-# ======================== STEP 6/8: 生成安装程序 ========================
+# ======================== STEP 6/9: 编译更新程序 ========================
+
+def step_update_binary():
+    """编译 update.exe (Go)：供设置页「检查更新」与手动双击应用升级包"""
+    step("6/9", "编译更新程序")
+
+    go_exe = shutil.which("go")
+    if not go_exe:
+        warn("Go 未找到，跳过 update.exe 编译")
+        return
+
+    version = find_version()
+    src_dir = BUILD_DIR / "update"
+    if not src_dir.exists():
+        warn(f"update 源码目录不存在: {src_dir}，跳过 update.exe 编译")
+        return
+    out_exe = DIST_DIR / "update.exe"
+
+    cmd = [
+        go_exe, "build",
+        "-C", str(src_dir),
+        "-ldflags", f"-s -w -X main.version={version}",
+        "-o", str(out_exe),
+        ".",
+    ]
+    run(cmd)
+    ok(f"update.exe (v{version})")
+
+
+# ======================== STEP 7/9: 生成安装程序 ========================
 
 def step_installer():
     """调用 ISCC 生成 Inno Setup 安装程序"""
-    step("6/8", "生成安装程序")
+    step("7/9", "生成安装程序")
 
     if not os.path.exists(ISCC):
         warn(f"ISCC 未找到: {ISCC}，跳过安装程序生成")
@@ -289,11 +330,11 @@ def step_installer():
     ok(exe_name)
 
 
-# ======================== STEP 7/8: 生成 ZIP 压缩包 ========================
+# ======================== STEP 8/9: 生成 ZIP 压缩包 ========================
 
 def step_zip():
     """把安装程序打成 zip（GitHub Release 分发用）"""
-    step("7/8", "生成 ZIP 压缩包")
+    step("8/9", "生成 ZIP 压缩包")
 
     version = find_version()
     exe_name = f"{APP_NAME}-{version}-x64.exe"
@@ -309,14 +350,47 @@ def step_zip():
     ok(zip_name)
 
 
-# ======================== STEP 8/8: 收尾清理 ========================
+# ======================== STEP 9/9: 生成更新包 ========================
 
-def step_finalize():
-    """清理 dist，仅保留安装包与 zip"""
-    step("8/8", "清理中间产物，仅保留发布产物")
+def step_update_package():
+    """把 script/ 打包为 GitHub Release 更新包 (v{version}.zip)"""
+    step("9/9", "生成更新包 (script zip)")
+
+    if not SCRIPT_DIR.exists():
+        warn(f"script 目录不存在，跳过: {SCRIPT_DIR}")
+        return
 
     version = find_version()
-    keep = {f"{APP_NAME}-{version}-x64.zip"}
+    zip_name = f"v{version}.zip"
+    zip_path = DIST_DIR / zip_name
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for file_path in sorted(SCRIPT_DIR.rglob("*")):
+            if file_path.is_file():
+                arcname = f"script/{file_path.relative_to(SCRIPT_DIR).as_posix()}"
+                zf.write(file_path, arcname=arcname)
+        # 附带启动器（主程序入口，更新版本时一起下发）
+        exe_path = DIST_DIR / f"{APP_NAME}.exe"
+        if exe_path.exists():
+            zf.write(exe_path, arcname=f"{APP_NAME}.exe")
+
+        # 附带 version 文件到 zip 根目录，覆盖旧版本号
+        ver_file = DIST_DIR / "version"
+        if ver_file.exists():
+            zf.write(ver_file, arcname="version")
+
+    file_count = sum(1 for _ in SCRIPT_DIR.rglob("*") if _.is_file())
+    ok(f"{zip_name} ({file_count} 文件 + exe + version)")
+
+
+# ======================== 收尾：清理 dist ========================
+
+def step_finalize():
+    """清理 dist，仅保留安装包 zip 与更新包 zip"""
+    step("收尾", "清理中间产物，仅保留发布产物")
+
+    version = find_version()
+    keep = {f"{APP_NAME}-{version}-x64.zip", f"v{version}.zip"}
 
     removed_files = 0
     removed_dirs = 0
@@ -357,13 +431,15 @@ def main() -> int:
     step_python_compile()
     step_assets()
     step_entry_point()
+    step_update_binary()
     step_installer()
     step_zip()
+    step_update_package()
     step_finalize()
 
     print()
     banner("构建完成！")
-    ok(f"dist/ 剩余: {APP_NAME}-{version}-x64.zip（内含安装程序）")
+    ok(f"dist/ 剩余: {APP_NAME}-{version}-x64.zip + v{version}.zip")
     print()
     return 0
 
