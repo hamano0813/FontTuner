@@ -9,6 +9,12 @@
   ```bash
   uv run pyside6-rcc res/res.qrc -o src/res.py
   ```
+  帮助页 HTML（`res/html/help.html`）由 `README.md` 经 pandoc 编译生成，改 README 后需再生成并重编译资源：
+  ```bash
+  build\make_help.bat      # 即 uv run build/make_help.py（pandoc --embed-resources）
+  uv run pyside6-rcc res/res.qrc -o src/res.py
+  ```
+  帮助页样式不在 HTML 里，而是 `src/ui/help/frame.py` 运行时按明暗主题注入（`setDefaultStyleSheet`）。
 - `build/` — 发布构建。`build_release.py` 一键发布（清理→uv 工具链→pyc 编译→资源→BatToExe 入口→Inno 安装器→zip→收尾），`build.bat` 一键入口，`setup.iss` Inno 安装脚本。
 - `data/` 与 `config.json` — 运行时可写数据，开发态在仓库根，打包安装后自动回落 `%APPDATA%\FontTuner`。
 
