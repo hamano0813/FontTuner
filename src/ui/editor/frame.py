@@ -3,25 +3,27 @@
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QSplitter, QVBoxLayout
+from PySide6.QtWidgets import QFileDialog, QFrame, QGridLayout, QHBoxLayout, QSplitter, QVBoxLayout
 from qfluentwidgets import (
     Action,
+    CommandBar,
     FluentIcon as FIF,
     InfoBar,
     InfoBarPosition,
     MessageBox,
     ProgressBar,
-    PushButton,
     RoundMenu,
     SwitchButton,
     ToggleButton,
+    isDarkTheme,
     qconfig,
 )
 
 from config import option
 from core import mapping
+from core.font_service import rename_entries, sort_entries
 from core.models import LANG_PREFIX, LANGS
-from core.templates import apply_template, load_templates
+from core.templates import apply_template, load_templates, resolve_entry_placeholders
 from ui.editor.columns import ITALIC_ITEMS, weight_items, width_items
 from ui.editor.delegates import CheckBoxDelegate, ComboDelegate, ReadOnlyDelegate, TextDelegate
 from ui.editor.model import FontTableModel
@@ -54,10 +56,35 @@ class EditorFrame(QFrame):
     # ---------------------------------------------------------------- 界面
 
     def _build_toolbar(self):
-        self.btn_import = PushButton(FIF.FOLDER_ADD, "导入字体", self)
-        self.btn_save = PushButton(FIF.SAVE, "保存", self)
-        self.btn_template = PushButton(FIF.BRUSH, "应用模板", self)
+        # ---- 第 1 行：三个功能按钮 → CommandBar ----
+        self.cmd_bar = CommandBar(self)
+        self.cmd_bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.cmd_bar.setSpaing(10)  # 按钮间距（qfw 方法名为 setSpaing）
+        self.action_import = Action(FIF.FOLDER_ADD, "导入字体")
+        self.action_import.triggered.connect(self._show_import_menu)
+        self.action_template = Action(FIF.BRUSH, "应用模板")
+        self.action_template.triggered.connect(self._show_template_menu)
+        self.action_parse = Action(FIF.CODE, "解析")
+        self.action_parse.triggered.connect(self._on_parse)
+        self.action_save = Action(FIF.SAVE, "保存")
+        self.action_save.triggered.connect(self._on_save)
+        self.action_rename = Action(FIF.TAG, "重命名")
+        self.action_rename.triggered.connect(self._on_rename)
+        self.cmd_bar.addAction(self.action_import)
+        self.cmd_bar.addAction(self.action_template)
+        self.cmd_bar.addAction(self.action_parse)
+        self.cmd_bar.addAction(self.action_save)
+        self.cmd_bar.addAction(self.action_rename)
+        # CommandBar 无内在宽度、默认 4px 间距，固定为内容宽度避免被网格拉伸后按钮挤在左边
+        self.cmd_bar.resizeToSuitableWidth()
+        # CommandBar 内部按钮（addAction 顺序与 _widgets 对应），供下拉菜单定位
+        self.btn_import = self.cmd_bar._widgets[0]
+        self.btn_template = self.cmd_bar._widgets[1]
+        self.btn_parse = self.cmd_bar._widgets[2]
+        self.btn_save = self.cmd_bar._widgets[3]
+        self.btn_rename = self.cmd_bar._widgets[4]
 
+        # ---- 第 2 行：简繁日英 + 开关 ----
         self.lang_toggles: dict[str, ToggleButton] = {}
         for lang in LANGS:
             btn = ToggleButton(LANG_PREFIX[lang], self)
@@ -75,20 +102,14 @@ class EditorFrame(QFrame):
         self.switch_preview.setChecked(True)
         self.switch_preview.checkedChanged.connect(self._on_switch_preview_changed)
 
-        self.btn_import.clicked.connect(self._show_import_menu)
-        self.btn_save.clicked.connect(self._on_save)
-        self.btn_template.clicked.connect(self._show_template_menu)
-
-        self.toolbar = QHBoxLayout()
-        for w in (self.btn_import, self.btn_save, self.btn_template):
-            self.toolbar.addWidget(w)
-        self.toolbar.addSpacing(24)
+        self.controls_row = QHBoxLayout()
+        self.controls_row.setSpacing(8)  # 语言开关/字段开关之间留间距，避免挤在一起
         for lang in LANGS:
-            self.toolbar.addWidget(self.lang_toggles[lang])
-        self.toolbar.addSpacing(16)
-        self.toolbar.addWidget(self.switch_extra)
-        self.toolbar.addWidget(self.switch_preview)
-        self.toolbar.addStretch(1)
+            self.controls_row.addWidget(self.lang_toggles[lang])
+        self.controls_row.addSpacing(16)
+        self.controls_row.addWidget(self.switch_extra)
+        self.controls_row.addWidget(self.switch_preview)
+        self.controls_row.addStretch(1)
 
     def _build_layout(self):
         self.splitter = QSplitter(Qt.Orientation.Vertical, self)
@@ -96,6 +117,18 @@ class EditorFrame(QFrame):
         self.splitter.addWidget(self.preview)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setSizes([520, 160])
+        self.splitter.setChildrenCollapsible(False)  # 拖到尽头不会把预览/表格折叠没了
+        self._style_splitter()
+
+        # 顶部网格：左列两行控件（CommandBar / 简繁日英+开关），右侧预览输入框跨两行
+        top = QGridLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setHorizontalSpacing(16)
+        top.addWidget(self.cmd_bar, 0, 0)
+        top.addLayout(self.controls_row, 1, 0)
+        top.addWidget(self.preview.sample_input, 0, 1, 2, 1)
+        top.setColumnStretch(0, 1)
+        top.setColumnStretch(1, 0)  # 输入框列固定宽
 
         self.progress = ProgressBar(self)
         self.progress.setVisible(False)
@@ -106,7 +139,7 @@ class EditorFrame(QFrame):
         status_bar.addWidget(self.progress, 1)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(self.toolbar)
+        layout.addLayout(top)
         layout.addWidget(self.splitter, 1)
         layout.addLayout(status_bar)
         self.setLayout(layout)
@@ -115,6 +148,32 @@ class EditorFrame(QFrame):
         from qfluentwidgets import CaptionLabel
         label = CaptionLabel("尚未导入字体", self)
         return label
+
+    def _style_splitter(self) -> None:
+        """把表格/预览分割手柄做成发丝线：中间 1px、两侧透明（保留拖拽热区）、悬停加深。
+
+        qfw 无 Splitter 控件，这里直接 setStyleSheet 覆盖原生手柄的默认凸边/把手。
+        qfw 的 setCustomStyleSheet 依赖 styleSheetManager 注册，对未注册的 splitter 不生效，
+        所以用普通 setStyleSheet + 主题切换时由 reset_style() 重刷亮/暗配色。
+        """
+        if isDarkTheme():
+            self.splitter.setStyleSheet(self._handle_qss(255, 255, 255, 0.10, 0.22))
+        else:
+            self.splitter.setStyleSheet(self._handle_qss(0, 0, 0, 0.10, 0.22))
+
+    @staticmethod
+    def _handle_qss(r: int, g: int, b: int, alpha: float, hover_alpha: float) -> str:
+        """生成手柄 QSS：6px 热区内垂直居中一条 1px 发丝线，hover 时加深。"""
+        line = f"rgba({r},{g},{b},{alpha})"
+        hline = f"rgba({r},{g},{b},{hover_alpha})"
+        grad = (f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+                f"stop:0 transparent, stop:0.48 {line}, stop:0.52 {line}, stop:1 transparent)")
+        hgrad = (f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+                 f"stop:0 transparent, stop:0.48 {hline}, stop:0.52 {hline}, stop:1 transparent)")
+        return (
+            f"QSplitter::handle:vertical {{ height: 6px; background: {grad}; }}"
+            f"QSplitter::handle:vertical:hover {{ background: {hgrad}; }}"
+        )
 
     def _on_switch_extra_changed(self, on: bool) -> None:
         self.table.set_extra_fields_visible(on)
@@ -212,6 +271,7 @@ class EditorFrame(QFrame):
         else:
             self.status_label.setText(f"已加载 {len(entries)} 个字体")
         self._append_import = False
+        sort_entries(entries)  # 统一按首选家族名→字重→字宽排序（含追加合并后的整体）
         self.model.set_entries(entries)
         app_signals.fonts_loaded.emit()
         if errors:
@@ -297,6 +357,60 @@ class EditorFrame(QFrame):
         selection = self.table.selectionModel()
         return sorted({i.row() for i in selection.selectedIndexes()})
 
+    def _on_parse(self):
+        """把选中（无选中则全部）字体的 {} 占位符解析为正常文本，落进表格。
+
+        保存时 build_font_setting 会隐式做同样的事；此按钮让它提前可见，
+        用户可直接看到最终文本再保存。
+        """
+        entries = self.model.get_entries()
+        if not entries:
+            InfoBar.warning("没有字体", "请先导入字体再解析。", parent=self.window(),
+                            position=InfoBarPosition.TOP, duration=3000)
+            return
+        rows = self._selected_rows()
+        targets = [entries[r] for r in rows] if rows else list(entries)
+        total = 0
+        for e in targets:
+            total += resolve_entry_placeholders(e)
+        self.model.set_entries(entries)  # 刷新表格显示解析后的文本
+        if total:
+            self.status_label.setText(f"已解析 {total} 个字段的占位符")
+            app_signals.project_edited.emit()
+        else:
+            self.status_label.setText("没有可解析的占位符")
+
+    def _on_rename(self):
+        """按 {首选家族名} {字重} {字宽} {版本} 重命名载入字体的文件。
+
+        重命名前先释放预览对字体的 QFontDatabase 注册（避免本进程占用锁）；
+        其他程序占用导致的失败会逐个报告，不中断整批。
+        """
+        entries = self.model.get_entries()
+        if not entries:
+            InfoBar.warning("没有字体", "请先导入字体再重命名。", parent=self.window(),
+                            position=InfoBarPosition.TOP, duration=3000)
+            return
+        renamed, skipped, errors = rename_entries(
+            entries, template=option.rename_template.value,
+            release_font=self.preview.release_font,
+        )
+        self.model.set_entries(entries)  # 刷新表格显示新文件名
+        parts = [f"重命名 {renamed} 个文件"]
+        if skipped:
+            parts.append(f"跳过 {skipped} 个")
+        if errors:
+            parts.append(f"失败 {len(errors)} 个")
+        self.status_label.setText("，".join(parts))
+        if errors:
+            InfoBar.error("重命名完成（有失败）", f"{len(errors)} 个文件失败：{errors[0][0]}",
+                          parent=self.window(), position=InfoBarPosition.TOP, duration=5000)
+        elif renamed:
+            InfoBar.success("重命名完成", f"已重命名 {renamed} 个文件。",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+        if renamed or errors:
+            app_signals.project_edited.emit()
+
     # ---------------------------------------------------------------- 主题
 
     def reset_style(self):
@@ -304,6 +418,8 @@ class EditorFrame(QFrame):
         self.table._init_style()
         self._setup_delegates()          # 重建委托（CellComboBox 构造时按 isDarkTheme 上色）
         self.table.viewport().update()   # 强制重绘（chip/文字颜色在绘制时取 isDarkTheme）
+        self._style_splitter()           # 分割手柄亮/暗配色
+        self.preview.refresh_theme()     # 预览 label 文字颜色跟随主题
 
     # ---------------------------------------------------------------- 预览
 
@@ -327,8 +443,7 @@ class EditorFrame(QFrame):
         self._worker = worker
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)  # 不确定进度
-        for w in (self.btn_import, self.btn_save, self.btn_template):
-            w.setEnabled(False)
+        self.cmd_bar.setEnabled(False)  # 处理期间禁用三个功能按钮
         worker.finished_ok.connect(on_finished)
         worker.progress.connect(self._on_progress)
         worker.finished.connect(self._on_worker_finished)
@@ -342,8 +457,7 @@ class EditorFrame(QFrame):
 
     def _on_worker_finished(self):
         self.progress.setVisible(False)
-        for w in (self.btn_import, self.btn_save, self.btn_template):
-            w.setEnabled(True)
+        self.cmd_bar.setEnabled(True)
         self._worker = None
 
     # ---------------------------------------------------------------- 供外部

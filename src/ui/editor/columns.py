@@ -10,6 +10,18 @@ from core.translations import weight_label, weight_labels, width_label, width_la
 # 单元格输入提示（模板版本号占位）用自定义数据角色返回
 PLACEHOLDER_ROLE = Qt.ItemDataRole.UserRole + 1
 
+# 语言英文代号（用于列英文别名）
+LANG_EN = {"SC": "SC", "TC": "TC", "JA": "JA", "EN": "EN"}
+
+# nameID → 英文名（列英文别名）
+NAME_ID_EN = {
+    0: "Copyright", 1: "Family", 2: "Subfamily", 3: "Unique ID", 4: "Full Name",
+    5: "Version", 6: "PostScript Name", 7: "Trademark", 8: "Manufacturer",
+    9: "Designer", 10: "Description", 11: "Vendor URL", 12: "License URL",
+    13: "License", 14: "Standard Variants", 16: "Preferred Family",
+    17: "Preferred Subfamily", 256: "WWS Family", 257: "WWS Subfamily", 258: "Palette",
+}
+
 
 @dataclass(frozen=True)
 class ColumnDef:
@@ -17,10 +29,15 @@ class ColumnDef:
     header: str
     kind: str             # ro | text | weight | width | italic | save
     editable: bool = True
+    en: str = ""          # 英文别名（列头 tooltip / 重命名变量备注）
 
 
 def _lang_header(lang: str, name_id: int) -> str:
     return f"{LANG_PREFIX[lang]}·{NAME_ID_LABELS[name_id]}"
+
+
+def _lang_en(lang: str, name_id: int) -> str:
+    return f"{LANG_EN[lang]} {NAME_ID_EN[name_id]}"
 
 
 def build_columns() -> list[ColumnDef]:
@@ -31,22 +48,26 @@ def build_columns() -> list[ColumnDef]:
     cols: list[ColumnDef] = []
     # 表格头部 4 列：临时名称（字体名·简/繁/日/英），供 {name_sc} 等占位符引用
     for lang in LANGS:
-        cols.append(ColumnDef(("temp", lang), f"字体名·{LANG_PREFIX[lang]}", "text"))
+        cols.append(ColumnDef(("temp", lang), f"字体名·{LANG_PREFIX[lang]}", "text",
+                              en=f"Temp Name {LANG_EN[lang]}"))
     cols += [
-        ColumnDef(("fixed", "fontPath"), "字体文件", "ro", editable=False),
-        ColumnDef(("fixed", "weight"), "字重", "weight"),
-        ColumnDef(("fixed", "width"), "字宽", "width"),
-        ColumnDef(("fixed", "italic"), "斜体", "italic"),
-        ColumnDef(("fixed", "numGlyphs"), "字形数", "ro", editable=False),
+        ColumnDef(("fixed", "fontPath"), "字体文件", "ro", editable=False, en="Font File"),
+        ColumnDef(("fixed", "weight"), "字重", "weight", en="Weight"),
+        ColumnDef(("fixed", "width"), "字宽", "width", en="Width"),
+        ColumnDef(("fixed", "italic"), "斜体", "italic", en="Italic"),
+        ColumnDef(("fixed", "numGlyphs"), "字形数", "ro", editable=False, en="Glyph Count"),
     ]
     # 字形数后面 4 列：字符集（简体/繁体/GBK 等），供 {charset_sc} 等占位符引用
     for lang in LANGS:
-        cols.append(ColumnDef(("charset", lang), f"字符集·{LANG_PREFIX[lang]}", "text"))
+        cols.append(ColumnDef(("charset", lang), f"字符集·{LANG_PREFIX[lang]}", "text",
+                              en=f"Charset {LANG_EN[lang]}"))
     for lang in LANGS:
-        cols.append(ColumnDef(("save", lang), f"保存·{LANG_PREFIX[lang]}", "save"))
+        cols.append(ColumnDef(("save", lang), f"保存·{LANG_PREFIX[lang]}", "save",
+                              en=f"Save {LANG_EN[lang]}"))
     for lang in LANGS:
         for nid in MANAGED_NAME_IDS:
-            cols.append(ColumnDef(("lang", lang, nid), _lang_header(lang, nid), "text"))
+            cols.append(ColumnDef(("lang", lang, nid), _lang_header(lang, nid), "text",
+                                  en=_lang_en(lang, nid)))
     return cols
 
 

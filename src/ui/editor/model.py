@@ -81,8 +81,12 @@ class FontTableModel(QAbstractTableModel):
         return len(self._columns)
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
+        if orientation != Qt.Orientation.Horizontal:
+            return None
+        if role == Qt.ItemDataRole.DisplayRole:
             return self._columns[section].header
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return f"{self._columns[section].header} · {self._columns[section].en}" if self._columns[section].en else None
         return None
 
     def flags(self, index):

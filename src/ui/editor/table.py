@@ -121,8 +121,10 @@ class FontTableView(TableView):
         for i, col in enumerate(self._model.columns):
             if col.kind == "save":
                 width = 68
+            elif col.key[0] == "charset":
+                width = 90  # 字符集值是短代码（GBK/Big5 等），列收窄
             elif col.key[0] == "lang":
-                width = 160
+                width = 100 if col.key[2] == 5 else 160  # 版本号(nameID 5)值较短，列收窄
             else:
                 width = _DEFAULT_WIDTHS.get(col.key[:2], 160)
             self.setColumnWidth(i, width)

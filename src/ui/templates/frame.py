@@ -138,6 +138,7 @@ class TemplateFrame(QFrame):
 
         self.list = ListWidget(self)
         self.list.itemSelectionChanged.connect(self._update_buttons)
+        self.list.itemDoubleClicked.connect(self._on_item_double_clicked)
 
         self.btn_new = PushButton(FIF.ADD, "新建", self)
         self.btn_edit = PushButton(FIF.EDIT, "编辑", self)
@@ -145,7 +146,7 @@ class TemplateFrame(QFrame):
         self.btn_apply = PrimaryPushButton(FIF.BRUSH, "应用到字体编辑页", self)
 
         self.btn_new.clicked.connect(self._on_new)
-        self.btn_edit.clicked.connect(self._on_edit)
+        self.btn_edit.clicked.connect(lambda: self._on_edit())
         self.btn_delete.clicked.connect(self._on_delete)
         self.btn_apply.clicked.connect(self._on_apply)
 
@@ -189,8 +190,14 @@ class TemplateFrame(QFrame):
             self._templates.append(dlg.result_template())
             self._persist()
 
-    def _on_edit(self):
-        tmpl = self._current()
+    def _on_item_double_clicked(self, item):
+        """双击列表项直接弹出编辑框。"""
+        tmpl = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if tmpl is not None:
+            self._on_edit(tmpl)
+
+    def _on_edit(self, tmpl: VendorTemplate | None = None):
+        tmpl = tmpl if tmpl is not None else self._current()
         if tmpl is None:
             return
         dlg = TemplateDialog(self.window(), tmpl)

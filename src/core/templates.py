@@ -68,6 +68,22 @@ def apply_template(entry: FontEntry, tmpl: VendorTemplate) -> None:
         entry.save_langs[lang] = True  # 模板可新建该语言记录
 
 
+def resolve_entry_placeholders(entry: FontEntry, langs: tuple = LANGS) -> int:
+    """把 entry 各语言 name 字段中的 `{占位符}` 就地解析为正常文本。
+
+    等价于保存时 build_font_setting 里的隐式解析，这里提前落进表格，
+    让用户直接看到最终文本。无占位符的字段跳过。返回解析的字段数。
+    """
+    count = 0
+    for lang in langs:
+        names = entry.names[lang]
+        for name_id, value in list(names.items()):
+            if "{" in value:
+                names[name_id] = format_name(value, entry, lang)
+                count += 1
+    return count
+
+
 # ---------------------------------------------------------------- 格式化
 
 class _SafeDict(dict):
