@@ -3,6 +3,7 @@ from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import MSFluentWindow, MessageBox, NavigationItemPosition
 
 from ui.editor.frame import EditorFrame
+from ui.package.frame import PackageFrame
 from ui.settings.frame import SettingsFrame
 from ui.signals import app_signals
 from ui.templates.frame import TemplateFrame
@@ -17,11 +18,13 @@ class MainWindow(MSFluentWindow):
         self.setMinimumSize(960, 600)
 
         self.editor_frame = EditorFrame(self)
+        self.package_frame = PackageFrame(self)
         self.template_frame = TemplateFrame(self)
         self.translation_frame = TranslationFrame(self)
         self.settings_frame = SettingsFrame(self)
 
         self.addSubInterface(self.editor_frame, FIF.EDIT, "字体编辑")
+        self.addSubInterface(self.package_frame, FIF.ZIP_FOLDER, "解包打包")
         self.addSubInterface(self.template_frame, FIF.BRUSH, "信息模板")
         self.addSubInterface(self.translation_frame, FIF.FONT, "翻译",
                              position=NavigationItemPosition.BOTTOM)

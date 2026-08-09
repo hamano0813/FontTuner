@@ -12,6 +12,7 @@ from qfluentwidgets import (
     OptionsConfigItem,
     OptionsValidator,
     QConfig,
+    RangeValidator,
     Theme,
     qconfig,
 )
@@ -30,6 +31,9 @@ class Option(QConfig):
     # 上次导入字体的目录，供文件对话框记忆
     import_dir = ConfigItem("OPTION", "IMPORT_DIR", "", FolderValidator())
 
+    # 解包/打包页的输出目录，供文件对话框记忆
+    package_out_dir = ConfigItem("OPTION", "PACKAGE_OUT_DIR", "", FolderValidator())
+
     # 字体预览的样例文字（PlainTextEdit 内容），重启后保留；一行一个语言
     preview_sample = ConfigItem(
         "OPTION", "PREVIEW_SAMPLE",
@@ -38,6 +42,9 @@ class Option(QConfig):
         "これは日本語のテストテキストです。フォントが正常に表示されるかテストします\n"
         "English test: ABC abc 0123",
     )
+
+    # 字体预览的字号（点），由预览面板 spinbox 调节
+    preview_font_size = ConfigItem("OPTION", "PREVIEW_FONT_SIZE", 24, RangeValidator(8, 72))
 
     # 字体文件重命名模板，{字段_xx} 按字体动态替换（xx=sc/tc/jp/en）
     rename_template = ConfigItem(
