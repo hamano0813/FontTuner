@@ -130,6 +130,12 @@ class SettingsFrame(QFrame):
         self.autostart_card.setChecked(autostart.is_enabled())
         self.autostart_card.checkedChanged.connect(self._on_autostart_toggled)
 
+        self.auto_restore_card = SwitchSettingCard(
+            FIF.HISTORY, "自动恢复选中",
+            "启动后自动恢复字体管理页保存的选中字体（配合开机自启，重启后自动重新注册）",
+            configItem=option.fontmgr_auto_restore, parent=self,
+        )
+
         # ===== 界面设置 =====
         self.theme_card = OptionsSettingCard(
             option.themeMode, FIF.PALETTE, "主题模式", "更改界面显示颜色",
@@ -159,6 +165,7 @@ class SettingsFrame(QFrame):
         # 无分组标题、无说明 label：SettingCard 自然叠放
         sub_layout = QVBoxLayout()
         sub_layout.addWidget(self.autostart_card)
+        sub_layout.addWidget(self.auto_restore_card)
         sub_layout.addWidget(self.theme_card)
         sub_layout.addWidget(self.rename_card)
         sub_layout.addWidget(self.preview_text_card)

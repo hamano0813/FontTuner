@@ -4,6 +4,7 @@ themeMode / themeColor 由 QConfig 基类提供；这里覆盖 themeMode 默认�
 """
 
 from qfluentwidgets import (
+    BoolValidator,
     ConfigItem,
     EnumSerializer,
     FolderListValidator,
@@ -37,6 +38,14 @@ class Option(QConfig):
 
     # 字体管理页扫描的字体库目录列表（持久化，重启后自动重新扫描）
     fontmgr_folders = ConfigItem("OPTION", "FONTMGR_FOLDERS", [], FolderListValidator())
+
+    # 字体管理页「保存选中」的字体路径列表（供「恢复选中」与启动自动恢复使用）
+    fontmgr_saved_selection = ConfigItem("OPTION", "FONTMGR_SAVED_SELECTION", [])
+
+    # 启动后自动恢复字体管理页保存的选中字体（配合开机自启，重启后自动重新注册）
+    fontmgr_auto_restore = ConfigItem(
+        "OPTION", "FONTMGR_AUTO_RESTORE", False, BoolValidator()
+    )
 
     # 字体预览的样例文字（PlainTextEdit 内容），重启后保留；一行一个语言
     preview_sample = ConfigItem(

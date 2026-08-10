@@ -72,6 +72,7 @@ class FontManagerFrame(QFrame):
         self._worker = None
         self._register_worker = None
         self._registered: set[str] = set()  # 本会话内由本工具注册过的字体路径
+        self._auto_restored = False         # 启动自动恢复只做一次（后续手动重扫不再套用）
 
         self.title = SubtitleLabel("字体管理", self)
         self.hint = CaptionLabel(
@@ -117,6 +118,18 @@ class FontManagerFrame(QFrame):
         layout.addWidget(self.tree, 1)
         filter_row = QHBoxLayout()
         filter_row.addWidget(self.filter_edit, 1)  # 撑满可用宽度
+        self.save_sel_button = PushButton(FIF.SAVE, "保存选中", self)
+        self.save_sel_button.setToolTip("把当前勾选的字体保存下来，供以后恢复")
+        self.save_sel_button.clicked.connect(self._on_save_selection)
+        self.restore_sel_button = PushButton(FIF.HISTORY, "恢复选中", self)
+        self.restore_sel_button.setToolTip("把已保存的勾选状态恢复到树中")
+        self.restore_sel_button.clicked.connect(self._on_restore_selection)
+        self.deselect_button = PushButton(FIF.CANCEL, "取消选中", self)
+        self.deselect_button.setToolTip("取消所有勾选，并注销全部已注册字体")
+        self.deselect_button.clicked.connect(self._on_deselect_all)
+        filter_row.addWidget(self.save_sel_button)
+        filter_row.addWidget(self.restore_sel_button)
+        filter_row.addWidget(self.deselect_button)
         layout.addLayout(filter_row)
         layout.addWidget(self.progress)
         layout.addWidget(self.preview_title)
@@ -159,6 +172,11 @@ class FontManagerFrame(QFrame):
             self._recompute_dir_states(root)  # 按叶子勾选态回填目录三态
         self.tree.blockSignals(False)
         self._apply_filter(self.filter_edit.text())  # 重新套用筛选
+        # 首次扫描完成且开启自动恢复：把保存的选中恢复到树中（重新注册）
+        if (not self._auto_restored and option.fontmgr_auto_restore.value
+                and option.fontmgr_saved_selection.value):
+            self._auto_restored = True
+            self._restore_selection(set(option.fontmgr_saved_selection.value))
         self.status_label.setText(f"已加载 {len(tree)} 个文件夹，勾选字体即可注册到 Windows。")
         if errors:
             InfoBar.error("部分文件夹扫描失败", f"{len(errors)} 个文件夹：{errors[0][0]}",
@@ -298,6 +316,67 @@ class FontManagerFrame(QFrame):
             walk(self.tree.topLevelItem(i))
         return checked
 
+    # ---------------------------------------------------------------- 选中持久化
+
+    def _on_save_selection(self):
+        """把当前勾选的字体路径保存到配置（供「恢复选中」与启动自动恢复使用）。"""
+        checked = self._collect_checked_fonts()
+        qconfig.set(option.fontmgr_saved_selection, sorted(checked))
+        InfoBar.success("已保存选中", f"已保存 {len(checked)} 个字体，可随时用「恢复选中」还原。",
+                        parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+
+    def _on_restore_selection(self):
+        """按已保存的路径恢复勾选态并同步注册。"""
+        saved = list(option.fontmgr_saved_selection.value)
+        if not saved:
+            InfoBar.warning("没有已保存的选中", "请先勾选字体并点击「保存选中」。",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+            return
+        if self.tree.topLevelItemCount() == 0:
+            InfoBar.warning("没有字体", "当前没有已加载的字体，请先添加字体库文件夹。",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+            return
+        self._restore_selection(set(saved))
+
+    def _on_deselect_all(self):
+        """取消全部勾选，并注销所有已注册字体。"""
+        if self.tree.topLevelItemCount() == 0:
+            return
+        self.tree.blockSignals(True)
+        for i in range(self.tree.topLevelItemCount()):
+            self._set_descendants_recursive(self.tree.topLevelItem(i), False)
+            self._recompute_dir_states(self.tree.topLevelItem(i))
+        self.tree.blockSignals(False)
+        self._sync_registration()
+        self._update_status()
+
+    def _restore_selection(self, paths: set[str]) -> None:
+        """把勾选态恢复为 paths（精确匹配，未在保存列表中的一律取消）。
+
+        路径先归一化（大小写/斜杠），避免跨会话保存的路径格式与扫描结果不一致。
+        阻塞信号逐个设置叶子，最后统一走 _sync_registration 批量注册/注销。
+        """
+        paths = {os.path.normcase(os.path.abspath(p)) for p in paths}
+        self.tree.blockSignals(True)
+        for i in range(self.tree.topLevelItemCount()):
+            self._apply_saved_checked(self.tree.topLevelItem(i), paths)
+            self._recompute_dir_states(self.tree.topLevelItem(i))
+        self.tree.blockSignals(False)
+        self._sync_registration()
+        self._update_status()
+
+    def _apply_saved_checked(self, item, paths: set[str]) -> None:
+        """递归：字体叶子按 paths 勾选/取消；目录节点不动，稍后统一回填三态。"""
+        for i in range(item.childCount()):
+            child = item.child(i)
+            if child.childCount() > 0:
+                self._apply_saved_checked(child, paths)
+            elif child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                path = child.data(0, Qt.ItemDataRole.UserRole)
+                key = os.path.normcase(os.path.abspath(path)) if path else ""
+                child.setCheckState(
+                    0, Qt.CheckState.Checked if key in paths else Qt.CheckState.Unchecked)
+
     def _sync_registration(self) -> None:
         """按当前树勾选态与 _registered 的差集批量注册/注销（后台线程，避免大量注册卡界面）。"""
         checked = self._collect_checked_fonts()
@@ -359,6 +438,9 @@ class FontManagerFrame(QFrame):
     def _set_busy(self, busy: bool) -> None:
         self.tree.setEnabled(not busy)
         self.folders_card.rescan_button.setEnabled(not busy)
+        self.save_sel_button.setEnabled(not busy)
+        self.restore_sel_button.setEnabled(not busy)
+        self.deselect_button.setEnabled(not busy)
 
     def _uncheck_paths(self, paths: set[str]) -> None:
         def walk(item):
