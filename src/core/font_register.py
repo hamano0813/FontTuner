@@ -322,7 +322,8 @@ def save_cache() -> None:
 def _cached_names(path: str) -> tuple[str, str, str, str]:
     """按 size+mtime 命中缓存则直接复用名称（不打开文件）；否则 struct 直读并更新缓存。
 
-    返回 (family, win_name, en_name, subfamily)。旧缓存条目缺 win_name/en_name 时回退 family。
+    返回 (family, subfamily, win_name, en_name)，与 _read_name_table 顺序一致。
+    旧缓存条目缺 win_name/en_name 时回退 family。
     """
     key = os.path.normcase(os.path.abspath(path))
     try:
@@ -334,17 +335,17 @@ def _cached_names(path: str) -> tuple[str, str, str, str]:
     if (cached and cached.get("v") == _CACHE_VERSION
             and cached.get("size") == size and cached.get("mtime") == mtime):
         family = cached.get("family") or ""
+        subfamily = cached.get("subfamily") or ""
         win_name = cached.get("win_name")
         en_name = cached.get("en_name")
-        subfamily = cached.get("subfamily") or ""
-        return family, (
+        return family, subfamily, (
             win_name if win_name is not None else family), (
-            en_name if en_name is not None else family), subfamily
+            en_name if en_name is not None else family)
     family, subfamily, win_name, en_name = _read_name_table(path)
     _cache[key] = {"v": _CACHE_VERSION, "family": family, "subfamily": subfamily,
                    "win_name": win_name, "en_name": en_name,
                    "size": size, "mtime": mtime}
-    return family, win_name, en_name, subfamily
+    return family, subfamily, win_name, en_name
 
 
 def _cached_faces(path: str) -> list[dict]:
