@@ -20,7 +20,7 @@ from qfluentwidgets import (
 )
 
 from config import option
-from core import mapping
+from core import fs, mapping
 from core.font_service import rename_entries, sort_entries
 from core.models import LANG_PREFIX, LANGS
 from core.templates import apply_template, load_templates, resolve_entry_placeholders
@@ -51,6 +51,7 @@ class EditorFrame(QFrame):
 
         self.table.selectionModel().currentChanged.connect(self._on_current_changed)
         self.model.valueChanged.connect(self._on_row_value_changed)
+        self.table.deleteFromDiskRequested.connect(self._on_delete_from_disk)
         self.table.setCurrentIndex(self.model.index(0, 0))
 
     # ---------------------------------------------------------------- 界面
@@ -409,6 +410,57 @@ class EditorFrame(QFrame):
                             parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
         if renamed or errors:
             app_signals.project_edited.emit()
+
+    # ---------------------------------------------------------------- 从磁盘删除
+
+    def _on_delete_from_disk(self, rows: list[int]) -> None:
+        """把选中行的字体文件移入回收站（从磁盘删除，可恢复）。
+
+        一个文件可能对应多行（TTC/OTC 多 face），按文件路径去重后统一删除；
+        删除前先释放预览对该字体的 QFontDatabase 注册（解除本进程占用锁）。
+        成功删除的路径对应行一并移出表格，失败（被占用等）的行保留并提示。
+        """
+        entries = self.model.get_entries()
+        paths = sorted({entries[r].font_path for r in rows if 0 <= r < len(entries)})
+        if not paths:
+            return
+
+        names = [os.path.basename(p) for p in paths]
+        preview = "\n".join(f"· {n}" for n in names[:8]) + ("\n…" if len(names) > 8 else "")
+        box = MessageBox("从磁盘删除",
+                         f"将删除 {len(paths)} 个字体文件（优先移入回收站；"
+                         f"无回收站的磁盘将永久删除）：\n{preview}\n\n"
+                         "确定删除？",
+                         self.window())
+        box.yesButton.setText("删除")
+        box.cancelButton.setText("取消")
+        if not box.exec():
+            return
+
+        for p in paths:
+            self.preview.release_font(p)  # 释放本进程对将被删除文件的注册占用
+        recycled, permanent, failed = fs.delete_files(paths)
+
+        deleted_paths = set(recycled) | set(permanent)
+        if deleted_paths:
+            # 只移除「文件确已删除」的行；失败与无关字体行都保留
+            self.model.remove_rows(
+                [r for r in range(len(entries)) if entries[r].font_path in deleted_paths]
+            )
+
+        if failed:
+            InfoBar.error("删除完成（部分失败）",
+                          f"{len(failed)} 个文件删除失败（可能被占用）："
+                          + "；".join(os.path.basename(p) for p in failed[:5]),
+                          parent=self.window(), position=InfoBarPosition.TOP, duration=5000)
+        elif permanent:
+            InfoBar.warning("已删除（不可恢复）",
+                            f"{len(permanent)} 个文件所在磁盘没有回收站，已永久删除："
+                            + "；".join(os.path.basename(p) for p in permanent[:5]),
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=6000)
+        elif recycled:
+            InfoBar.success("已删除", f"已将 {len(recycled)} 个字体文件移入回收站。",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
 
     # ---------------------------------------------------------------- 主题
 

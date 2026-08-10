@@ -1,6 +1,6 @@
 """字体表格视图：qfw TableView + 复制粘贴删除 + 语言列显隐。"""
 
-from PySide6.QtCore import QModelIndex, Qt
+from PySide6.QtCore import QModelIndex, Qt, Signal
 from PySide6.QtGui import QContextMenuEvent, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import QTableView
 from qfluentwidgets import Action, FluentIcon as FIF, RoundMenu, TableView, setCustomStyleSheet
@@ -18,6 +18,8 @@ _DEFAULT_WIDTHS = {
 
 
 class FontTableView(TableView):
+    deleteFromDiskRequested = Signal(list)  # 行号列表 → 页面处理从磁盘删除（含确认/释放预览）
+
     def __init__(self, model, parent=None):
         super().__init__(parent)
         self._model = model
@@ -77,8 +79,18 @@ class FontTableView(TableView):
         del_action = Action(FIF.DELETE, "删除选中字体")
         del_action.triggered.connect(self._remove_selected_rows)
         menu.addAction(del_action)
+        menu.addSeparator()
+        disk_action = Action(FIF.CANCEL, "从磁盘删除…")
+        disk_action.triggered.connect(self._delete_from_disk)
+        menu.addAction(disk_action)
         menu.exec(e.globalPos())
         e.accept()
+
+    def _delete_from_disk(self):
+        """右键「从磁盘删除…」：把选中的行号交给页面处理（确认 + 移入回收站）。"""
+        rows = sorted({i.row() for i in self.selectionModel().selectedIndexes()})
+        if rows:
+            self.deleteFromDiskRequested.emit(rows)
 
     def _remove_selected_rows(self):
         """从界面移除选中的整行字体（不删文件，仅不再编辑）。"""
