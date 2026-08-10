@@ -199,9 +199,10 @@ def recommend_pack_name(srcs: Iterable[str]) -> str | None:
 
 
 def _collection_sort_key(font) -> tuple:
-    """集合内排序键：Regular（字重 400 且非斜体）排第一，其余按 字重→字宽→斜体 升序。
+    """集合内排序键：标准 Regular（字重 400、正常字宽 5、非斜体）排第一，其余按 字重→字宽→斜体 升序。
 
-    Windows 双击 TTC 预览默认显示集合第一个 face，Regular 置顶预览才正常。
+    Windows 双击 TTC 预览默认显示集合第一个 face，标准 Regular 置顶预览才正常；
+    只判字重会漏掉字宽——窄字宽（如 Condensed）会排到正常字宽前面。
     """
     try:
         os2 = font["OS/2"]
@@ -210,7 +211,7 @@ def _collection_sort_key(font) -> tuple:
         italic = bool(os2.fsSelection & 1)
     except Exception:
         weight, width, italic = 400, 5, False
-    regular = weight == 400 and not italic
+    regular = weight == 400 and width == 5 and not italic
     return (not regular, weight, width, italic)
 
 

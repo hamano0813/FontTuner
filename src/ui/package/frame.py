@@ -226,14 +226,22 @@ class PackageFrame(QFrame):
         top = QHBoxLayout()
         self.pack_add = PushButton(FIF.FOLDER_ADD, "添加字体文件", panel)
         self.pack_add.clicked.connect(self._on_pack_add)
+        self.pack_select_all = PushButton("全选", panel)
+        self.pack_select_all.clicked.connect(self._set_pack_all_selected)
+        self.pack_select_none = PushButton("全不选", panel)
+        self.pack_select_none.clicked.connect(lambda: self.pack_list.clearSelection())
         self.pack_remove = PushButton(FIF.DELETE, "移除选中", panel)
         self.pack_remove.clicked.connect(self._on_pack_remove)
         top.addWidget(self.pack_add)
+        top.addWidget(self.pack_select_all)
+        top.addWidget(self.pack_select_none)
         top.addWidget(self.pack_remove)
         top.addStretch(1)
         v.addLayout(top)
 
         self.pack_list = ListWidget(panel)
+        # 支持 Ctrl/Shift 多选，「移除选中」可一次移除多个
+        self.pack_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         v.addWidget(self.pack_list, 1)
 
         grid = QGridLayout()
@@ -287,6 +295,11 @@ class PackageFrame(QFrame):
         for item in self.pack_list.selectedItems():
             self.pack_list.takeItem(self.pack_list.row(item))
         self._update_pack_name_default()
+
+    def _set_pack_all_selected(self):
+        """全选：选中列表中全部字体（配合「移除选中」批量移除）。"""
+        for i in range(self.pack_list.count()):
+            self.pack_list.item(i).setSelected(True)
 
     def _update_pack_name_default(self) -> None:
         """按所选字体中 Regular 的家族名刷新默认文件名（用户手改后不再覆盖）。"""
@@ -357,5 +370,6 @@ class PackageFrame(QFrame):
     def _set_busy(self, busy: bool) -> None:
         for btn in (self.unpack_add, self.unpack_check_all, self.unpack_check_none,
                     self.unpack_remove, self.unpack_run,
-                    self.pack_add, self.pack_remove, self.pack_run):
+                    self.pack_add, self.pack_select_all, self.pack_select_none,
+                    self.pack_remove, self.pack_run):
             btn.setEnabled(not busy)
