@@ -156,12 +156,12 @@ class TemplateDialog(MessageBoxBase):
                 onClick=lambda checked=False, w=tab: self.stack.setCurrentWidget(w),
             )
 
-        name_row = QHBoxLayout()
-        name_row.addWidget(BodyLabel("名称", self))
-        name_row.addWidget(self.name_edit, 1)
-
-        rename_row = QHBoxLayout()
-        rename_row.addWidget(BodyLabel("重命名模板", self))
+        # 名称 / 重命名模板：同一列 label、同一列输入，grid 对齐
+        meta_grid = QGridLayout()
+        meta_grid.setSpacing(8)
+        meta_grid.addWidget(BodyLabel("名称", self), 0, 0)
+        meta_grid.addWidget(self.name_edit, 0, 1)
+        meta_grid.addWidget(BodyLabel("重命名模板", self), 1, 0)
         self.rename_edit = LineEdit(self)
         self.rename_edit.setClearButtonEnabled(True)
         self.rename_edit.setPlaceholderText(
@@ -171,11 +171,11 @@ class TemplateDialog(MessageBoxBase):
         self.rename_edit.installEventFilter(
             ToolTipFilter(self.rename_edit, showDelay=300, position=ToolTipPosition.TOP)
         )
-        rename_row.addWidget(self.rename_edit, 1)
+        meta_grid.addWidget(self.rename_edit, 1, 1)
+        meta_grid.setColumnStretch(1, 1)
 
         self.viewLayout.addWidget(self.title_label)
-        self.viewLayout.addLayout(name_row)
-        self.viewLayout.addLayout(rename_row)
+        self.viewLayout.addLayout(meta_grid)
         self.viewLayout.addSpacing(8)
         self.viewLayout.addWidget(self.segmented)
         self.viewLayout.addWidget(self.stack)
