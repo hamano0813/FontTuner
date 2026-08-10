@@ -1,4 +1,4 @@
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QIcon, QPixmap
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF
@@ -98,14 +98,25 @@ class MainWindow(MSFluentWindow):
         self.help_frame.reset_style()
 
     def _request_quit(self):
-        """托盘菜单「退出」：置放行标志后 close()，由 closeEvent 处理未保存再真正退出。"""
+        """托盘菜单「退出」：置放行标志后 close()，由 closeEvent 处理未保存再真正退出。
+
+        用 singleShot(0) 延后到托盘菜单关闭之后再 close：若直接在托盘菜单动作里
+        close，模态确认框会与正在关闭的托盘菜单竞争激活，导致确认框不出现、退出卡死。
+        """
         self._quitting = True
-        self.close()
+        QTimer.singleShot(0, self.close)
 
     def closeEvent(self, e: QCloseEvent):
         if self._quitting:
             # 真正退出：先处理未保存，确认后才放行（取消则恢复标志并保持运行）
             if self._dirty:
+                # 托盘态窗口已隐藏：先显示窗口，确认框才有可见父窗口。
+                # 否则模态框以隐藏窗口为 owner，Windows 不激活/显示它，box.exec()
+                # 空转导致退出卡死。
+                if not self.isVisible():
+                    self.show()
+                    self.raise_()
+                    self.activateWindow()
                 box = MessageBox("未保存的修改", "有修改尚未保存，确定退出吗？", self)
                 box.yesButton.setText("退出")
                 box.cancelButton.setText("取消")
