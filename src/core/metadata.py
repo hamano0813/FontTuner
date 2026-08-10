@@ -213,15 +213,24 @@ def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
 
 def save_metadata(font_setting: dict, font: TTFont | None = None, remove_groups=()):
     """Save the metadata of the font setting and write them back to the font file."""
-    # load the font if not given
+    # load the font if not given（自己打开的要负责关闭，否则句柄锁住文件）
     if font is None:
         font = TTFont(font_setting["fontPath"])
-    # apply the settings
-    apply_font_settings(font, font_setting, remove_groups)
-    # save the font
+        own_font = True
+    else:
+        own_font = False
     try:
+        # apply the settings
+        apply_font_settings(font, font_setting, remove_groups)
+        # save the font
         font.save(font_setting["fontPath"])
         return True
     except PermissionError as e:
         print(f"Failed to save {font_setting['fontPath']}. Permission denied.")
         return False
+    finally:
+        if own_font:
+            try:
+                font.close()
+            except Exception:
+                pass

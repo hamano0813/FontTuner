@@ -42,8 +42,10 @@ def load_entries(paths: Iterable[str], progress: ProgressFn | None = None) -> tu
     total = len(files)
     for i, path in enumerate(files):
         try:
-            for index, font in font_io.open_fonts(path):
-                entries.append(mapping.read_entry(path, index, font))
+            # with 保证读完元数据后立即关闭字体句柄（lazy TTFont 不关会锁住文件）
+            with font_io.open_fonts(path) as fonts:
+                for index, font in fonts:
+                    entries.append(mapping.read_entry(path, index, font))
         except Exception as exc:
             errors.append((path, str(exc)))
         if progress:
@@ -236,12 +238,18 @@ def _save_single(path: str, group: list[FontEntry]) -> None:
 
 def _save_collection(path: str, group: list[FontEntry]) -> None:
     collection = TTCollection(path)
-    for entry in group:
-        font = collection.fonts[entry.font_index]
-        _metadata.apply_font_settings(
-            font,
-            mapping.build_font_setting(entry),
-            remove_groups=mapping.compute_remove_groups(entry),
-        )
-    # 全部子字体应用成功才写回一次，失败不落盘
-    collection.save(path)
+    try:
+        for entry in group:
+            font = collection.fonts[entry.font_index]
+            _metadata.apply_font_settings(
+                font,
+                mapping.build_font_setting(entry),
+                remove_groups=mapping.compute_remove_groups(entry),
+            )
+        # 全部子字体应用成功才写回一次，失败不落盘
+        collection.save(path)
+    finally:
+        try:
+            collection.close()
+        except Exception:
+            pass
