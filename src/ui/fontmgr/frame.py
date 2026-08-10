@@ -12,8 +12,10 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -38,7 +40,8 @@ from qfluentwidgets import (
 )
 
 from config import option
-from core import font_register
+from core import font_register, subtitle_font
+from ui.fontmgr.subtitle_dialog import SubtitleFontDialog
 from ui.fontmgr.worker import RegisterWorker, ScanWorker, UserFontWorker
 
 
@@ -90,8 +93,13 @@ class FontManagerFrame(QFrame):
         self.folders_card.rescanRequested.connect(self._on_rescan)
 
         self.tree = TreeWidget(self)
-        self.tree.setColumnCount(1)
-        self.tree.setHeaderLabels(["字体文件（勾选即注册到 Windows）"])
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(["字体文件（勾选即注册到 Windows）", "Windows 标准字体名"])
+        header = self.tree.header()
+        header.setStretchLastSection(False)
+        # 两列等宽：都走 Stretch，随窗口缩放始终保持 1:1
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.currentItemChanged.connect(self._on_current_item_changed)
         # 多选 + 右键菜单：批量安装/取消安装到当前用户（勾选框仍负责会话级注册）
@@ -130,6 +138,10 @@ class FontManagerFrame(QFrame):
         layout.addWidget(self.tree, 1)
         filter_row = QHBoxLayout()
         filter_row.addWidget(self.filter_edit, 1)  # 撑满可用宽度
+        self.subtitle_button = PushButton(FIF.VIDEO, "字幕适配", self)
+        self.subtitle_button.setToolTip("选择 .ass/.ssa 字幕，把其中用到的字体名批量替换为当前字体库中的字体")
+        self.subtitle_button.clicked.connect(self._on_subtitle_adapt)
+        filter_row.addWidget(self.subtitle_button)
         self.save_sel_button = PushButton(FIF.SAVE, "保存选中", self)
         self.save_sel_button.setToolTip("把当前勾选的字体保存下来，供以后恢复")
         self.save_sel_button.clicked.connect(self._on_save_selection)
@@ -209,7 +221,10 @@ class FontManagerFrame(QFrame):
 
         注意：必须遍历全部子项以逐一 setHidden，不能用 any() 短路。
         """
-        self_match = not text or text in item.text(0).lower() or text in (item.toolTip(0) or "").lower()
+        self_match = (not text
+                      or text in item.text(0).lower()
+                      or text in item.text(1).lower()
+                      or text in (item.toolTip(0) or "").lower())
         if item.childCount() > 0:
             child_visible = False
             for i in range(item.childCount()):
@@ -222,23 +237,26 @@ class FontManagerFrame(QFrame):
         return visible
 
     def _build_item(self, node: dict) -> QTreeWidgetItem:
-        item = QTreeWidgetItem([node["name"]])
+        win_name = node.get("win_name") or ""
+        item = QTreeWidgetItem([node["name"], win_name])
         item.setData(0, Qt.ItemDataRole.UserRole, node["path"])
         item.setData(0, Qt.ItemDataRole.UserRole + 1, node.get("family") or "")
         item.setData(0, Qt.ItemDataRole.UserRole + 3, bool(node.get("installed")))
+        item.setData(0, Qt.ItemDataRole.UserRole + 4, win_name)  # Windows 标准字体名
+        item.setData(0, Qt.ItemDataRole.UserRole + 5, node.get("en_name") or "")  # 英文系统名（隐藏匹配词）
         installed_user_path = node.get("installed_user_path") or ""
         if node["is_font"] and node["installed"]:
             # 系统已装：灰显标记，不提供勾选，避免误卸系统字体
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             item.setText(0, f"{node['name']}（系统已安装）")
             item.setForeground(0, QColor("#8a8a8a"))
-            item.setToolTip(0, f"{node['family'] or node['name']} — 已由系统安装，无需注册")
+            item.setToolTip(0, f"{win_name or node['family'] or node['name']} — 已由系统安装，无需注册")
         elif node["is_font"] and installed_user_path:
             # 本工具安装到当前用户：灰显不可勾选，右键可取消安装
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             item.setText(0, f"{node['name']}（已安装到当前用户）")
             item.setForeground(0, QColor("#8a8a8a"))
-            item.setToolTip(0, f"{node['family'] or node['name']} — 已安装到当前用户，可直接使用")
+            item.setToolTip(0, f"{win_name or node['family'] or node['name']} — 已安装到当前用户，可直接使用")
             item.setData(0, Qt.ItemDataRole.UserRole + 2, installed_user_path)
         else:
             # 目录与可注册字体：都提供勾选框（目录勾选 = 整目录批量注册）
@@ -247,7 +265,7 @@ class FontManagerFrame(QFrame):
             if node["is_font"]:
                 item.setCheckState(
                     0, Qt.CheckState.Checked if node["path"] in self._registered else Qt.CheckState.Unchecked)
-                item.setToolTip(0, node["family"] or node["name"])
+                item.setToolTip(0, win_name or node["family"] or node["name"])
         for child in node.get("children", []):
             item.addChild(self._build_item(child))
         return item
@@ -371,6 +389,92 @@ class FontManagerFrame(QFrame):
         self.tree.blockSignals(False)
         self._sync_registration()
         self._update_status()
+
+    # ---------------------------------------------------------------- 字幕字体适配
+
+    def _collect_library_font_names(self) -> list[tuple[str, str]]:
+        """当前字体库全部字体名：[(win_name, en_name), …] 按显示名去重排序。
+
+        win_name 作下拉显示项，en_name（英文系统名）作隐藏匹配词。
+        """
+        seen: dict[str, str] = {}  # win_name -> en_name
+        for i in range(self.tree.topLevelItemCount()):
+            self._collect_item_font_names(self.tree.topLevelItem(i), seen)
+        return sorted(seen.items())
+
+    def _collect_item_font_names(self, item, seen: dict[str, str]) -> None:
+        for i in range(item.childCount()):
+            child = item.child(i)
+            if child.childCount() > 0:
+                self._collect_item_font_names(child, seen)
+            else:
+                win = child.data(0, Qt.ItemDataRole.UserRole + 4) \
+                    or child.data(0, Qt.ItemDataRole.UserRole + 1) or ""
+                if win:
+                    seen.setdefault(win, child.data(0, Qt.ItemDataRole.UserRole + 5) or "")
+
+    def _on_subtitle_adapt(self):
+        """字幕字体适配：选 .ass/.ssa，把用到的字体名批量替换为当前字体库中的字体。"""
+        paths, _ = QFileDialog.getOpenFileNames(
+            self.window(), "选择字幕文件（可多选）", "",
+            "字幕文件 (*.ass *.ssa);;所有文件 (*.*)")
+        if not paths:
+            return
+
+        # 收集字幕字体名（跨文件去重）
+        ass_fonts: set[str] = set()
+        for p in paths:
+            try:
+                text, _ = subtitle_font.read_subtitle(p)
+            except (OSError, UnicodeDecodeError) as exc:
+                InfoBar.error("读取失败", f"{os.path.basename(p)}：{exc}",
+                              parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+                continue
+            ass_fonts.update(subtitle_font.extract_font_names(text))
+        if not ass_fonts:
+            InfoBar.warning("未找到字体名", "所选字幕中未解析到任何字体名（无 Style 行或 \\fn 标签）。",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+            return
+
+        library = self._collect_library_font_names()
+        if not library:
+            InfoBar.warning("字体库为空", "当前没有已加载的字体，无法进行字幕适配。",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+            return
+
+        dlg = SubtitleFontDialog(sorted(ass_fonts), library, self.window())
+        if not dlg.exec():
+            return
+        mapping = dlg.result_mapping()
+        if not mapping:
+            InfoBar.info("未做替换", "未选择任何替换字体，字幕保持不变。",
+                         parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+            return
+
+        # 批量替换并写回原文件
+        changed_files = 0
+        total_repl = 0
+        for p in paths:
+            try:
+                text, enc = subtitle_font.read_subtitle(p)
+            except (OSError, UnicodeDecodeError) as exc:
+                InfoBar.error("读取失败", f"{os.path.basename(p)}：{exc}",
+                              parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+                continue
+            new_text, n = subtitle_font.apply_replacements(text, mapping)
+            if n == 0:
+                continue
+            try:
+                subtitle_font.write_subtitle(p, new_text, enc)
+            except (OSError, UnicodeEncodeError) as exc:
+                InfoBar.error("写入失败", f"{os.path.basename(p)}：{exc}",
+                              parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+                continue
+            changed_files += 1
+            total_repl += n
+        if changed_files:
+            InfoBar.success("替换完成", f"共替换 {total_repl} 处字体名，修改 {changed_files} 个文件。",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
 
     def _restore_selection(self, paths: set[str]) -> None:
         """把勾选态恢复为 paths（精确匹配，未在保存列表中的一律取消）。
@@ -660,6 +764,12 @@ class FontManagerFrame(QFrame):
         self._userfont_worker = None
         self._set_busy(self._register_worker is not None)
 
+    def _item_display_name(self, item, fallback: str) -> str:
+        """节点的展示名：Windows 标准字体名（win_name）优先，回退 family / 文件名。"""
+        return (item.data(0, Qt.ItemDataRole.UserRole + 4)
+                or item.data(0, Qt.ItemDataRole.UserRole + 1)
+                or fallback)
+
     def _mark_installed_user(self, item, installed_path: str) -> None:
         """安装成功：节点置灰不可勾选；若正被会话注册则先注销（副本已可用）。"""
         path = item.data(0, Qt.ItemDataRole.UserRole)
@@ -672,7 +782,7 @@ class FontManagerFrame(QFrame):
         name = os.path.basename(path)
         item.setText(0, f"{name}（已安装到当前用户）")
         item.setForeground(0, QColor("#8a8a8a"))
-        item.setToolTip(0, f"{item.data(0, Qt.ItemDataRole.UserRole + 1) or name} — 已安装到当前用户，可直接使用")
+        item.setToolTip(0, f"{self._item_display_name(item, name)} — 已安装到当前用户，可直接使用")
         item.setData(0, Qt.ItemDataRole.UserRole + 2, installed_path)
         self.tree.blockSignals(False)
         self._update_ancestors(item)
@@ -686,7 +796,7 @@ class FontManagerFrame(QFrame):
         name = os.path.basename(path)
         item.setText(0, name)
         item.setForeground(0, QBrush())
-        item.setToolTip(0, item.data(0, Qt.ItemDataRole.UserRole + 1) or name)
+        item.setToolTip(0, self._item_display_name(item, name))
         item.setData(0, Qt.ItemDataRole.UserRole + 2, "")
         self.tree.blockSignals(False)
         self._update_ancestors(item)

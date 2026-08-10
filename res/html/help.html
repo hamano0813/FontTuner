@@ -25,27 +25,32 @@ Windows 桌面应用。它围绕字体文件（<code>.ttf</code> / <code>.otf</c
 <tbody>
 <tr>
 <td><strong>字体管理</strong></td>
-<td>树形浏览字体库文件夹，勾选即注册到
-Windows（当前会话有效），系统已装字体灰显标记；目录级三态勾选、按名称/家族名筛选、底部多语言预览</td>
+<td>树形浏览字体库文件夹，两列展示（文件名 + Windows
+标准字体名，简→繁→日→英优先取用），勾选即注册到
+Windows（当前会话有效），系统已装字体灰显标记；目录级三态勾选、按名称/家族名筛选、底部多语言预览；<strong>字幕适配</strong>：把
+<code>.ass</code>/<code>.ssa</code>
+字幕用到的字体名批量替换为字体库字体</td>
 </tr>
 <tr>
 <td><strong>解包打包</strong></td>
 <td><code>.ttc</code>/<code>.otc</code> 集合 → 拆成独立
 <code>.ttf</code>/<code>.otf</code>；多个
 <code>.ttf</code>/<code>.otf</code> → 合并成
-<code>.ttc</code>/<code>.otc</code>。按字体内名称命名，重名自动加序号</td>
+<code>.ttc</code>/<code>.otc</code>。按字体内名称命名（首选家族名-首选子家族名），重名自动加序号</td>
 </tr>
 <tr>
 <td><strong>字体编辑</strong></td>
 <td>批量编辑 name 表 20 个字段 ×
-简/繁/日/英四种语言：家族名、子家族名、唯一标识、全名、字体名、版权、厂商、许可等；字重/字宽/斜体直接编辑；临时名称/字符集占位列</td>
+简/繁/日/英四种语言：家族名、子家族名、唯一标识、全名、字体名、版权、厂商、许可等；字重/字宽/斜体直接编辑；临时名称/字符集占位列；重命名模板列（跟随信息模板，空
+= 不重命名）</td>
 </tr>
 <tr>
 <td><strong>信息模板</strong></td>
 <td>维护字体信息字段集（JSON
 持久化），在「字体编辑」页一键应用到选中/全部字体；支持
 <code>{weight}</code>、<code>{family_sc}</code>
-等占位符，解析为空文本时自动删除前导空格</td>
+等占位符，解析为空文本时自动删除前导空格；每模板可携带<strong>重命名模板</strong>（空
+= 应用模板时不重命名）</td>
 </tr>
 <tr>
 <td><strong>翻译方案</strong></td>
@@ -53,10 +58,21 @@ Windows（当前会话有效），系统已装字体灰显标记；目录级三�
 </tr>
 <tr>
 <td><strong>设置</strong></td>
-<td>主题模式/主题色、字体文件重命名模板、预览文字与字号、关于与版权</td>
+<td>主题模式、预览文字与字号、开机自动启动、自动恢复选中、关于与检查更新</td>
 </tr>
 </tbody>
 </table>
+<h3 id="字幕字体适配细节">字幕字体适配细节</h3>
+<ul>
+<li>从字幕的 <strong>Style 行</strong>（<code>[V4+ Styles]</code> /
+<code>[V4 Styles]</code> 的 Fontname 字段）与事件行的
+<strong><code>{\fn字体名}</code></strong>
+覆盖标签提取字体名，跨文件去重。</li>
+<li>每个字体名一行，右侧下拉从<strong>当前字体库</strong>选择替换字体：与字体库完全匹配的自动预选，未匹配的留空（=
+不替换）；下拉支持输入匹配（中文名或英文系统名，忽略大小写）。</li>
+<li>确定后批量替换写回原文件，保留原编码（UTF-8 / UTF-16
+BOM、GBK）与换行，<code>[Fonts]</code> 内嵌二进制节不受影响。</li>
+</ul>
 <h3 id="字体编辑细节">字体编辑细节</h3>
 <ul>
 <li><strong>四语言编辑</strong>：简（sc）/ 繁（tc）/ 日（jp）/
@@ -71,19 +87,23 @@ Windows（当前会话有效），系统已装字体灰显标记；目录级三�
 <code>Regular</code>，勾选保存的语言统一写入。</li>
 <li><strong>保存前解析</strong>：未解析的 <code>{...}</code>
 占位符在保存时自动展开为实际文本。</li>
+<li><strong>重命名模板列</strong>：字体编辑页的「重命名模板」列跟随信息模板；空
+= 应用模板时不重命名，填写 =
+由「解析」按钮一并按占位符展开为文件名。</li>
 </ul>
 <hr />
 <h2 id="快速上手">快速上手</h2>
 <ol type="1">
 <li>在<strong>字体管理</strong>页勾选目标字体（或按目录三态勾选），即可注册到
-Windows，系统已装字体自动灰显。</li>
+Windows，系统已装字体自动灰显；需要批量改字幕字体时，用「字幕适配」选择
+<code>.ass</code>/<code>.ssa</code> 文件。</li>
 <li>用<strong>解包打包</strong>页拆分
 <code>.ttc</code>/<code>.otc</code>
 集合为独立字体，或在编辑后合并回集合。</li>
 <li>在<strong>字体编辑</strong>页批量修改 name
-表元数据，配合<strong>信息模板</strong>一键套用预设字段集。</li>
+表元数据，配合<strong>信息模板</strong>一键套用预设字段集与重命名模板。</li>
 <li>用<strong>翻译方案</strong>页统一字重/字宽/斜体标签的简繁日英文案。</li>
-<li>在<strong>设置</strong>页配置主题、字体文件重命名模板与预览文字。</li>
+<li>在<strong>设置</strong>页配置主题、预览文字与字号、开机自启与自动恢复选中。</li>
 </ol>
 <hr />
 <h2 id="下载与使用">下载与使用</h2>
