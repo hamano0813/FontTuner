@@ -23,7 +23,12 @@ from config import option
 from core import fs, mapping
 from core.font_service import rename_entries, sort_entries
 from core.models import LANG_PREFIX, LANGS
-from core.templates import apply_template, load_templates, resolve_entry_placeholders
+from core.templates import (
+    apply_template,
+    apply_translations,
+    load_templates,
+    resolve_entry_placeholders,
+)
 from ui.editor.columns import weight_items, width_items
 from ui.editor.delegates import CheckBoxDelegate, ComboDelegate, ReadOnlyDelegate, TextDelegate
 from ui.editor.model import FontTableModel
@@ -349,7 +354,11 @@ class EditorFrame(QFrame):
             targets = list(entries)
         for e in targets:
             apply_template(e, tmpl)
-        self.model.set_entries(entries)
+        if apply_translations(tmpl):
+            # 捆绑翻译已写入全局：重建下拉委托并刷新表格显示（含 {weight} 等新术语）
+            self.refresh_after_translations()
+        else:
+            self.model.set_entries(entries)
         self.status_label.setText(f"已应用模板「{tmpl.name}」到 {len(targets)} 个字体")
         app_signals.project_edited.emit()
 

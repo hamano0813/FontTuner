@@ -7,14 +7,15 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 
+from core import translations
 from core.models import CHARSET_TEMP_CODES, LANGS, NAME_TEMP_CODES, FontEntry
 from core.paths import TEMPLATES_PATH
 
-# 模板可设置的字段：全部 name 字段，排除版权(0)与子家族名(2)。
-# 版权不靠模板编辑；子家族名在应用模板时按字重隐式写 Bold/Regular。
-TEMPLATE_NAME_IDS = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 256, 257, 258]
+# 模板可设置的字段：全部 name 字段，排除子家族名(2)。
+# 子家族名在应用模板时按字重隐式写 Bold/Regular，不靠模板编辑。
+TEMPLATE_NAME_IDS = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 256, 257, 258]
 # 应用模板时不从模板读取的字段（兼容旧模板 JSON 里的残留值）
-_TEMPLATE_SKIP_IDS = (0, 2)
+_TEMPLATE_SKIP_IDS = (2,)
 
 
 @dataclass
@@ -22,7 +23,9 @@ class VendorTemplate:
     name: str
     field_values: dict[str, dict[int, str]] = field(default_factory=dict)
     # lang_key("ALL"/"SC"/"TC"/"JA"/"EN") -> {nameID: value}
-    # 字重/字宽/斜体不属于模板，应用模板不操作这些
+    translations: dict[str, dict[str, dict]] = field(default_factory=dict)
+    # lang_key("SC"/"TC"/"JA"/"EN") -> {"weight": {value: label}, "width": {...}, "italic": {bool: label}}
+    # 捆绑该厂商的字重/字宽/斜体标签；应用模板时写入全局翻译字典并持久化
 
 
 def load_templates(path: str | None = None) -> list[VendorTemplate]:
@@ -41,8 +44,19 @@ def load_templates(path: str | None = None) -> list[VendorTemplate]:
             lang: {int(nid): text for nid, text in values.items()}
             for lang, values in item.get("field_values", {}).items()
         }
+        # 翻译键同样还原：weight/width 键回 int，italic 键回 bool
+        translations_data: dict[str, dict] = {}
+        for lang, kinds in item.get("translations", {}).items():
+            parsed: dict[str, dict] = {}
+            for kind, values in kinds.items():
+                if kind == "italic":
+                    parsed[kind] = {k.lower() == "true": lbl for k, lbl in values.items()}
+                else:
+                    parsed[kind] = {int(v): lbl for v, lbl in values.items()}
+            translations_data[lang] = parsed
         item = dict(item)
         item["field_values"] = field_values
+        item["translations"] = translations_data
         templates.append(VendorTemplate(**item))
     return templates
 
@@ -59,8 +73,8 @@ def apply_template(entry: FontEntry, tmpl: VendorTemplate) -> None:
 
     模板中为空的字段不覆盖，保留字体原有值；模板文本原样写入，
     含 `{...}` 占位符的字段不做展开，留给「解析」按钮/保存时解析。
-    版权(0)/子家族名(2) 不从模板读取；子家族名对勾选保存的语言
-    隐式写固定文本：字重 700 → Bold，其余 → Regular（不分语言）。
+    子家族名(2) 不从模板读取；对勾选保存的语言隐式写固定文本：
+    字重 700 → Bold，其余 → Regular（不分语言）。
     """
     all_values = tmpl.field_values.get("ALL", {})
     for lang in LANGS:
@@ -80,6 +94,32 @@ def apply_template(entry: FontEntry, tmpl: VendorTemplate) -> None:
     for lang in LANGS:
         if entry.save_langs[lang]:
             entry.names[lang][2] = subfamily
+
+
+def apply_translations(tmpl: VendorTemplate) -> int:
+    """把模板捆绑的字重/字宽/斜体标签写入全局翻译字典并持久化。
+
+    模板中为空的标签跳过，保留全局当前值；非空标签覆盖对应 (值, 语言)。
+    返回实际写入的标签数。translations.save() 把生效标签落盘，重启后
+    仍保持该厂商术语。
+    """
+    count = 0
+    for lang, kinds in tmpl.translations.items():
+        for kind, values in kinds.items():
+            for value, label in values.items():
+                if not label or not label.strip():
+                    continue
+                if kind == "weight":
+                    translations.set_weight_label(int(value), lang, label)
+                elif kind == "width":
+                    translations.set_width_label(int(value), lang, label)
+                elif kind == "italic":
+                    translations.set_italic_label(bool(value), lang, label)
+                else:
+                    continue
+                count += 1
+    translations.save()
+    return count
 
 
 def resolve_entry_placeholders(entry: FontEntry, langs: tuple = LANGS) -> int:

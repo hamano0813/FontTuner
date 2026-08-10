@@ -15,7 +15,9 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel,
+    CaptionLabel,
     FluentIcon as FIF,
+    HeaderCardWidget,
     LineEdit,
     ListWidget,
     MessageBoxBase,
@@ -28,6 +30,7 @@ from qfluentwidgets import (
     ToolTipPosition,
 )
 
+from core import translations
 from core.models import LANG_LABELS, LANGS, NAME_ID_LABELS
 from core.templates import TEMPLATE_NAME_IDS, VendorTemplate, load_templates, save_templates
 
@@ -43,15 +46,24 @@ _PLACEHOLDER_HINT = (
 
 
 class _LangFieldTab(ScrollArea):
-    """单个语言的字段编辑面板：字段多时限定高度内部滚动。"""
+    """单个语言的编辑面板：name 字段 + 该语言的字重/字宽/斜体翻译。
+
+    内容多时限定高度内部滚动；翻译输入框预填当前全局标签，便于厂商模板
+    直接带走整套翻译，留空表示应用模板时不覆盖该标签。
+    """
 
     def __init__(self, lang: str, parent=None):
         super().__init__(parent)
         self.setObjectName(f"LangTab{lang}")
         self.edits: dict[int, LineEdit] = {}
+        self.trans_edits: dict[tuple, LineEdit] = {}
 
         content = QWidget(self)
-        grid = QGridLayout(content)
+        outer = QVBoxLayout(content)
+        outer.setSpacing(12)
+
+        # ---- name 字段 ----
+        grid = QGridLayout()
         grid.setSpacing(12)
         for row, (nid, label) in enumerate(_TEMPLATE_FIELDS):
             grid.addWidget(BodyLabel(label, content), row, 0)
@@ -63,12 +75,60 @@ class _LangFieldTab(ScrollArea):
             self.edits[nid] = edit
             grid.addWidget(edit, row, 1)
         grid.setColumnStretch(1, 1)
-        grid.setRowStretch(len(_TEMPLATE_FIELDS), 1)  # 字段少时内容顶部对齐
+        outer.addLayout(grid)
+
+        # ---- 该语言的翻译：左字重卡，右字宽卡+斜体卡（纵向叠放）----
+        outer.addSpacing(8)
+        outer.addWidget(BodyLabel("字重 / 字宽 / 斜体翻译", content))
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(12)
+        cards_row.addWidget(self._make_trans_card(content, lang, "weight"), 1)
+        right = QWidget(content)
+        right_box = QVBoxLayout(right)
+        right_box.setSpacing(12)
+        right_box.addWidget(self._make_trans_card(content, lang, "width"))
+        right_box.addWidget(self._make_trans_card(content, lang, "italic"))
+        right_box.addStretch(1)
+        cards_row.addWidget(right, 1)
+        outer.addLayout(cards_row)
+        outer.addStretch(1)
 
         self.setWidget(content)
         self.setWidgetResizable(True)
-        self.setMaximumHeight(380)  # 20 个字段也不让对话框过高，内部滚动
+        self.setMaximumHeight(380)  # 内容多时也不让对话框过高，内部滚动
         self.enableTransparentBackground()  # 保持对话框底色，不显示滚动区自带背景
+
+    def _make_trans_card(self, parent, lang: str, kind: str) -> HeaderCardWidget:
+        """单个翻译卡（字重/字宽/斜体）：`值 · EN 默认标签 | 输入框` 行。"""
+        title = {"weight": "字重", "width": "字宽", "italic": "斜体"}[kind]
+        card = HeaderCardWidget(title, parent)
+        body = QWidget(card)
+        grid = QGridLayout(body)
+        grid.setSpacing(10)
+        grid.setColumnStretch(1, 1)
+        if kind == "italic":
+            values = [False, True]
+        else:
+            values = sorted(
+                translations.weight_labels("EN") if kind == "weight"
+                else translations.width_labels("EN")
+            )
+        for row, value in enumerate(values):
+            grid.addWidget(CaptionLabel(self._trans_caption(kind, value), body), row, 0)
+            edit = LineEdit(body)
+            self.trans_edits[(kind, value)] = edit
+            grid.addWidget(edit, row, 1)
+        grid.setRowStretch(len(values), 1)  # 行少时卡体内整体顶部对齐
+        card.viewLayout.addWidget(body)
+        return card
+
+    def _trans_caption(self, kind: str, value) -> str:
+        """翻译行标识：`值 · EN 默认标签`（斜体用 正常/斜体 前缀）。"""
+        if kind == "italic":
+            return f"{'正常' if not value else '斜体'} · {translations.italic_label(value, 'EN')}"
+        if kind == "weight":
+            return f"{value} · {translations.weight_label(value, 'EN')}"
+        return f"{value} · {translations.width_label(value, 'EN')}"
 
 
 class TemplateDialog(MessageBoxBase):
@@ -116,9 +176,27 @@ class TemplateDialog(MessageBoxBase):
             values = template.field_values.get(lang, {})
             for nid, edit in tab.edits.items():
                 edit.setText(values.get(nid, ""))
+            trans = template.translations.get(lang, {})
+            for (kind, value), edit in tab.trans_edits.items():
+                stored = trans.get(kind, {}).get(value)
+                if stored is not None:
+                    # 模板显式存了该标签（含清空的 ''），如实显示
+                    edit.setText(stored)
+                else:
+                    # 模板未涉及该标签，预填当前全局标签，方便整卷带走
+                    edit.setText(self._global_label(kind, value, lang))
+
+    @staticmethod
+    def _global_label(kind: str, value, lang: str) -> str:
+        if kind == "weight":
+            return translations.weight_label(value, lang)
+        if kind == "width":
+            return translations.width_label(value, lang)
+        return translations.italic_label(value, lang)
 
     def result_template(self) -> VendorTemplate:
         field_values: dict[str, dict[int, str]] = {}
+        trans_values: dict[str, dict] = {}
         for lang, tab in self.lang_tabs.items():
             values = {
                 nid: edit.text().strip()
@@ -127,9 +205,17 @@ class TemplateDialog(MessageBoxBase):
             }
             if values:
                 field_values[lang] = values
+            trans: dict[str, dict] = {}
+            for (kind, value), edit in tab.trans_edits.items():
+                label = edit.text().strip()
+                if label:
+                    trans.setdefault(kind, {})[value] = label
+            if trans:
+                trans_values[lang] = trans
         return VendorTemplate(
             name=self.name_edit.text().strip() or "未命名模板",
             field_values=field_values,
+            translations=trans_values,
         )
 
 
