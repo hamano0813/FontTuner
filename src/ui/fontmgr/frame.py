@@ -2,13 +2,16 @@
 
 会话级注册：勾选即 AddFontResourceEx 加入系统字体表，全会话应用可枚举；取消即注销。
 系统已装字体（注册表 Fonts 键 / Windows\\Fonts）在树里灰显标记，不提供勾选，避免误卸。
+右键可把字体「安装到当前用户」（复制 + HKCU 注册表，DirectWrite 应用如 Terminal/VS Code
+也能用），已安装字体灰显、右键可「取消安装」。
 """
 
 import os
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontDatabase
+from PySide6.QtGui import QBrush, QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -16,14 +19,17 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 from qfluentwidgets import (
+    Action,
     CaptionLabel,
     Dialog,
     FluentIcon as FIF,
     FolderListSettingCard,
     InfoBar,
     InfoBarPosition,
+    MessageBox,
     ProgressBar,
     PushButton,
+    RoundMenu,
     SearchLineEdit,
     SubtitleLabel,
     TreeWidget,
@@ -33,7 +39,7 @@ from qfluentwidgets import (
 
 from config import option
 from core import font_register
-from ui.fontmgr.worker import RegisterWorker, ScanWorker
+from ui.fontmgr.worker import RegisterWorker, ScanWorker, UserFontWorker
 
 
 class FontFoldersCard(FolderListSettingCard):
@@ -71,8 +77,10 @@ class FontManagerFrame(QFrame):
         self.setObjectName("FontManagerFrame")
         self._worker = None
         self._register_worker = None
+        self._userfont_worker = None
         self._registered: set[str] = set()  # 本会话内由本工具注册过的字体路径
         self._auto_restored = False         # 启动自动恢复只做一次（后续手动重扫不再套用）
+        self._userfont_item_map: dict = {}  # 批量安装/卸载时 库路径 -> 树节点，线程返回后回填
 
         self.title = SubtitleLabel("字体管理", self)
         self.hint = CaptionLabel(
@@ -86,6 +94,10 @@ class FontManagerFrame(QFrame):
         self.tree.setHeaderLabels(["字体文件（勾选即注册到 Windows）"])
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.currentItemChanged.connect(self._on_current_item_changed)
+        # 多选 + 右键菜单：批量安装/取消安装到当前用户（勾选框仍负责会话级注册）
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._on_tree_context_menu)
 
         # 筛选框：按名称/家族名过滤树内容（QTreeWidgetItem 重勾选/三态，手动 show/hide 过滤）
         self.filter_edit = SearchLineEdit(self)
@@ -212,12 +224,22 @@ class FontManagerFrame(QFrame):
     def _build_item(self, node: dict) -> QTreeWidgetItem:
         item = QTreeWidgetItem([node["name"]])
         item.setData(0, Qt.ItemDataRole.UserRole, node["path"])
+        item.setData(0, Qt.ItemDataRole.UserRole + 1, node.get("family") or "")
+        item.setData(0, Qt.ItemDataRole.UserRole + 3, bool(node.get("installed")))
+        installed_user_path = node.get("installed_user_path") or ""
         if node["is_font"] and node["installed"]:
             # 系统已装：灰显标记，不提供勾选，避免误卸系统字体
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             item.setText(0, f"{node['name']}（系统已安装）")
             item.setForeground(0, QColor("#8a8a8a"))
             item.setToolTip(0, f"{node['family'] or node['name']} — 已由系统安装，无需注册")
+        elif node["is_font"] and installed_user_path:
+            # 本工具安装到当前用户：灰显不可勾选，右键可取消安装
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+            item.setText(0, f"{node['name']}（已安装到当前用户）")
+            item.setForeground(0, QColor("#8a8a8a"))
+            item.setToolTip(0, f"{node['family'] or node['name']} — 已安装到当前用户，可直接使用")
+            item.setData(0, Qt.ItemDataRole.UserRole + 2, installed_user_path)
         else:
             # 目录与可注册字体：都提供勾选框（目录勾选 = 整目录批量注册）
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -432,8 +454,8 @@ class FontManagerFrame(QFrame):
     def _on_register_worker_done(self):
         self.progress.setVisible(False)
         self.status_label.setText(f"已注册 {len(self._registered)} 个字体（当前会话有效，重启后失效）")
-        self._set_busy(False)
         self._register_worker = None
+        self._set_busy(self._userfont_worker is not None)
 
     def _set_busy(self, busy: bool) -> None:
         self.tree.setEnabled(not busy)
@@ -491,19 +513,200 @@ class FontManagerFrame(QFrame):
     def _update_status(self) -> None:
         self.status_label.setText(f"已注册 {len(self._registered)} 个字体（当前会话有效，重启后失效）")
 
+    # ---------------------------------------------------------------- 安装到当前用户
+
+    def _on_tree_context_menu(self, pos):
+        """树右键：按选中集合（目录自动展开到字体叶）提供安装/取消安装到当前用户。"""
+        item = self.tree.itemAt(pos)
+        if item is None:
+            return
+        if item in self.tree.selectedItems():
+            items = self.tree.selectedItems()
+        else:  # 右键在选中集之外：以该节点为准
+            self.tree.clearSelection()
+            item.setSelected(True)
+            items = [item]
+
+        to_install: list = []    # (item, path, family)
+        to_uninstall: list = []  # (item, family, path)
+        seen_paths: set = set()
+        seen_families: set = set()
+
+        def walk(it):
+            if it.childCount() > 0:
+                for i in range(it.childCount()):
+                    walk(it.child(i))
+                return
+            path = it.data(0, Qt.ItemDataRole.UserRole)
+            if not path or it.data(0, Qt.ItemDataRole.UserRole + 3):
+                return  # 系统已装字体不提供安装/卸载
+            installed_path = it.data(0, Qt.ItemDataRole.UserRole + 2)
+            family = it.data(0, Qt.ItemDataRole.UserRole + 1) or \
+                os.path.splitext(os.path.basename(path))[0]
+            if installed_path:
+                key = ("u", family.lower())
+                if key not in seen_families:
+                    seen_families.add(key)
+                    to_uninstall.append((it, family, path))
+            elif it.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                if path not in seen_paths:
+                    seen_paths.add(path)
+                    to_install.append((it, path, family))
+
+        for it in items:
+            walk(it)
+
+        if not to_install and not to_uninstall:
+            return
+        menu = RoundMenu(self.tree)
+        if to_install:
+            n = len(to_install)
+            act = Action(FIF.ADD, "安装到当前用户" if n == 1 else f"安装到当前用户（{n} 个）", menu)
+            act.triggered.connect(lambda: self._on_install_to_user(list(to_install)))
+            menu.addAction(act)
+        if to_uninstall:
+            n = len(to_uninstall)
+            act = Action(FIF.DELETE, "取消安装" if n == 1 else f"取消安装（{n} 个）", menu)
+            act.triggered.connect(lambda: self._on_uninstall_from_user(list(to_uninstall)))
+            menu.addAction(act)
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _on_install_to_user(self, entries):
+        """批量安装到当前用户（单个直接执行；批量先确认）。"""
+        if len(entries) > 1:
+            names = [os.path.basename(p) for _, p, _ in entries]
+            preview = "\n".join(f"· {n}" for n in names[:8]) + ("\n…" if len(names) > 8 else "")
+            box = MessageBox(
+                "安装到当前用户",
+                f"将把 {len(entries)} 个字体安装到当前用户（复制到用户字体目录并注册）：\n{preview}",
+                self.window())
+            box.yesButton.setText("安装")
+            box.cancelButton.setText("取消")
+            if not box.exec():
+                return
+        self._userfont_item_map = {p: it for it, p, _ in entries}
+        self._start_userfont([(p, f) for _, p, f in entries], [])
+
+    def _on_uninstall_from_user(self, entries):
+        """批量取消安装（删除用户目录文件，被占用的重启后自动清理）。"""
+        names = [os.path.basename(p) for _, _, p in entries]
+        preview = "\n".join(f"· {n}" for n in names[:8]) + ("\n…" if len(names) > 8 else "")
+        box = MessageBox(
+            "取消安装",
+            f"将移除 {len(entries)} 个字体（删除用户目录中的文件）：\n{preview}\n\n"
+            "被占用的文件会在重启后自动清理。",
+            self.window())
+        box.yesButton.setText("取消安装")
+        box.cancelButton.setText("保留")
+        if not box.exec():
+            return
+        self._userfont_item_map = {p: it for it, f, p in entries}
+        self._start_userfont([], [(f, p) for it, f, p in entries])
+
+    def _start_userfont(self, to_install, to_uninstall) -> None:
+        if self._register_worker is not None or self._userfont_worker is not None:
+            return
+        worker = UserFontWorker(to_install, to_uninstall, self)
+        self._userfont_worker = worker
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)
+        self._set_busy(True)
+        worker.progress.connect(self._on_userfont_progress)
+        worker.finished_ok.connect(self._on_userfont_finished)
+        worker.finished.connect(self._on_userfont_worker_done)
+        worker.start()
+
+    def _on_userfont_progress(self, done, total):
+        if total > 0:
+            self.progress.setRange(0, total)
+            self.progress.setValue(done)
+            self.status_label.setText(f"正在安装/取消安装字体 {done}/{total}")
+
+    def _on_userfont_finished(self, results):
+        for r in results:
+            item = self._userfont_item_map.get(r["path"])
+            if item is None:
+                continue
+            if r["kind"] == "install":
+                if r["ok"]:
+                    self._mark_installed_user(item, r["installed_path"])
+                else:
+                    InfoBar.error("安装失败", f"{os.path.basename(r['path'])}：{r['message']}",
+                                  parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+            elif r["ok"]:
+                self._mark_uninstalled(item)
+                if r["status"] == "locked":
+                    InfoBar.warning("文件未删除", f"{os.path.basename(r['path'])} 的文件未能删除，"
+                                    "但已取消注册，残留文件可手动清理。",
+                                    parent=self.window(), position=InfoBarPosition.TOP, duration=5000)
+        installed = [r for r in results if r["kind"] == "install" and r["ok"]]
+        uninst = [r for r in results if r["kind"] == "uninstall" and r["ok"]]
+        deferred = [r for r in uninst if r["status"] == "deferred"]
+        parts = []
+        if installed:
+            parts.append(f"已安装 {len(installed)} 个字体")
+        if uninst:
+            parts.append(f"已取消 {len(uninst)} 个字体")
+        if deferred:
+            parts.append(f"{len(deferred)} 个文件重启后自动清理")
+        if parts:
+            InfoBar.info("字体安装已更新", "，".join(parts), parent=self.window(),
+                         position=InfoBarPosition.TOP, duration=4000)
+        self._update_status()
+
+    def _on_userfont_worker_done(self):
+        self.progress.setVisible(False)
+        self._userfont_item_map = {}
+        self._userfont_worker = None
+        self._set_busy(self._register_worker is not None)
+
+    def _mark_installed_user(self, item, installed_path: str) -> None:
+        """安装成功：节点置灰不可勾选；若正被会话注册则先注销（副本已可用）。"""
+        path = item.data(0, Qt.ItemDataRole.UserRole)
+        if path in self._registered:
+            font_register.unregister_font(path)
+            self._registered.discard(path)
+        self.tree.blockSignals(True)
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(0, Qt.CheckState.Unchecked)
+        name = os.path.basename(path)
+        item.setText(0, f"{name}（已安装到当前用户）")
+        item.setForeground(0, QColor("#8a8a8a"))
+        item.setToolTip(0, f"{item.data(0, Qt.ItemDataRole.UserRole + 1) or name} — 已安装到当前用户，可直接使用")
+        item.setData(0, Qt.ItemDataRole.UserRole + 2, installed_path)
+        self.tree.blockSignals(False)
+        self._update_ancestors(item)
+
+    def _mark_uninstalled(self, item) -> None:
+        """取消安装：节点恢复可勾选（未勾选）。"""
+        path = item.data(0, Qt.ItemDataRole.UserRole)
+        self.tree.blockSignals(True)
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(0, Qt.CheckState.Unchecked)
+        name = os.path.basename(path)
+        item.setText(0, name)
+        item.setForeground(0, QBrush())
+        item.setToolTip(0, item.data(0, Qt.ItemDataRole.UserRole + 1) or name)
+        item.setData(0, Qt.ItemDataRole.UserRole + 2, "")
+        self.tree.blockSignals(False)
+        self._update_ancestors(item)
+
     # ---------------------------------------------------------------- 底部预览
 
     def _on_current_item_changed(self, current, previous):
-        """选中字体叶子时用该字体渲染 4 行预览文字。"""
+        """选中字体叶子时用该字体渲染 4 行预览文字（含已安装到当前用户的字体）。"""
         if current is None:
             self._clear_preview()
             return
         path = current.data(0, Qt.ItemDataRole.UserRole)
-        is_font_leaf = current.childCount() == 0 and current.flags() & Qt.ItemFlag.ItemIsUserCheckable
+        installed_path = current.data(0, Qt.ItemDataRole.UserRole + 2)
+        is_font_leaf = current.childCount() == 0 and (
+            current.flags() & Qt.ItemFlag.ItemIsUserCheckable or bool(installed_path))
         if not path or not is_font_leaf:
             self._clear_preview()
             return
-        self._preview_font(path)
+        # 已安装到当前用户的字体读本地副本预览（更快，且库盘（如 RaiDrive）离线也能预览）
+        self._preview_font(installed_path or path)
 
     def _preview_font(self, path: str) -> None:
         """进程内注册字体（QFontDatabase）并取家族名，供渲染预览。"""

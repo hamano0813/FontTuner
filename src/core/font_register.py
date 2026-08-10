@@ -13,7 +13,7 @@ import os
 import struct
 import winreg
 
-from core import font_io
+from core import font_io, userfont
 from core.paths import DATA_DIR
 
 _HWND_BROADCAST = 0xFFFF
@@ -240,6 +240,7 @@ def scan_folder_tree(root: str, errors: list) -> dict | None:
         "family": "",
         "is_font": False,
         "installed": False,
+        "installed_user_path": "",
         "children": [],
     }
     for entry in entries:
@@ -257,11 +258,14 @@ def scan_folder_tree(root: str, errors: list) -> dict | None:
 
 def font_node(path: str) -> dict:
     """单个字体文件的树节点；名称用文件名（文件树视角），家族名放 tooltip。"""
+    family = _cached_family(path)
+    installed_user_path = userfont.find_user_font(family) if family else ""
     return {
         "path": path,
         "name": os.path.basename(path),
-        "family": _cached_family(path),
+        "family": family,
         "is_font": True,
         "installed": is_font_installed(path),
+        "installed_user_path": installed_user_path,
         "children": [],
     }
