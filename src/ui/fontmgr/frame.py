@@ -558,7 +558,7 @@ class FontManagerFrame(QFrame):
 
         if not to_install and not to_uninstall:
             return
-        menu = RoundMenu(self.tree)
+        menu = RoundMenu(parent=self.tree)
         if to_install:
             n = len(to_install)
             act = Action(FIF.ADD, "安装到当前用户" if n == 1 else f"安装到当前用户（{n} 个）", menu)
