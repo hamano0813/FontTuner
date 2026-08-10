@@ -52,6 +52,7 @@ def build_columns() -> list[ColumnDef]:
                               en=f"Temp Name {LANG_EN[lang]}"))
     cols += [
         ColumnDef(("fixed", "fontPath"), "字体文件", "ro", editable=False, en="Font File"),
+        ColumnDef(("fixed", "renameTemplate"), "重命名模板", "text", en="Rename Template"),
         ColumnDef(("fixed", "weight"), "字重", "weight", en="Weight"),
         ColumnDef(("fixed", "width"), "字宽", "width", en="Width"),
         ColumnDef(("fixed", "italic"), "斜体", "italic", en="Italic"),

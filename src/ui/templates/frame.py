@@ -31,6 +31,7 @@ from qfluentwidgets import (
 )
 
 from core import translations
+from core.font_service import rename_placeholder_help
 from core.models import LANG_LABELS, LANGS, NAME_ID_LABELS
 from core.templates import TEMPLATE_NAME_IDS, VendorTemplate, load_templates, save_templates
 
@@ -159,8 +160,22 @@ class TemplateDialog(MessageBoxBase):
         name_row.addWidget(BodyLabel("名称", self))
         name_row.addWidget(self.name_edit, 1)
 
+        rename_row = QHBoxLayout()
+        rename_row.addWidget(BodyLabel("重命名模板", self))
+        self.rename_edit = LineEdit(self)
+        self.rename_edit.setClearButtonEnabled(True)
+        self.rename_edit.setPlaceholderText(
+            "空 = 应用模板时不重命名；如 {preferred_family_sc} {weight_sc} {width_sc} {version_sc}"
+        )
+        self.rename_edit.setToolTip(rename_placeholder_help())
+        self.rename_edit.installEventFilter(
+            ToolTipFilter(self.rename_edit, showDelay=300, position=ToolTipPosition.TOP)
+        )
+        rename_row.addWidget(self.rename_edit, 1)
+
         self.viewLayout.addWidget(self.title_label)
         self.viewLayout.addLayout(name_row)
+        self.viewLayout.addLayout(rename_row)
         self.viewLayout.addSpacing(8)
         self.viewLayout.addWidget(self.segmented)
         self.viewLayout.addWidget(self.stack)
@@ -173,6 +188,7 @@ class TemplateDialog(MessageBoxBase):
 
     def _load(self, template: VendorTemplate) -> None:
         self.name_edit.setText(template.name)
+        self.rename_edit.setText(template.rename_template or "")
         for lang, tab in self.lang_tabs.items():
             values = template.field_values.get(lang, {})
             for nid, edit in tab.edits.items():
@@ -217,6 +233,7 @@ class TemplateDialog(MessageBoxBase):
             name=self.name_edit.text().strip() or "未命名模板",
             field_values=field_values,
             translations=trans_values,
+            rename_template=self.rename_edit.text().strip(),
         )
 
 

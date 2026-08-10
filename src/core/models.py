@@ -46,6 +46,7 @@ class FontEntry:
     save_langs: dict[str, bool] = field(default_factory=lambda: {l: False for l in LANGS})
     temp_names: dict[str, str] = field(default_factory=lambda: {l: "" for l in LANGS})
     charsets: dict[str, str] = field(default_factory=lambda: {l: "" for l in LANGS})
+    rename_template: str = ""   # 重命名模板（含 {占位符}；空=不重命名）
     _raw_groups: set[tuple[int, int, int]] = field(default_factory=set, repr=False)
 
     @property

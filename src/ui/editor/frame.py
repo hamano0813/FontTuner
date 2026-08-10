@@ -21,7 +21,7 @@ from qfluentwidgets import (
 
 from config import option
 from core import fs, mapping
-from core.font_service import rename_entries, sort_entries
+from core.font_service import rename_entries, resolve_rename_template, sort_entries
 from core.models import LANG_PREFIX, LANGS
 from core.templates import (
     apply_template,
@@ -369,6 +369,7 @@ class EditorFrame(QFrame):
     def _on_parse(self):
         """把选中（无选中则全部）字体的 {} 占位符解析为正常文本，落进表格。
 
+        同时解析「重命名模板」列（无占位符或解析不出的模板保持原样）。
         保存时 build_font_setting 会隐式做同样的事；此按钮让它提前可见，
         用户可直接看到最终文本再保存。
         """
@@ -382,6 +383,7 @@ class EditorFrame(QFrame):
         total = 0
         for e in targets:
             total += resolve_entry_placeholders(e)
+            total += int(resolve_rename_template(e))
         self.model.set_entries(entries)  # 刷新表格显示解析后的文本
         if total:
             self.status_label.setText(f"已解析 {total} 个字段中的占位符")
@@ -390,7 +392,7 @@ class EditorFrame(QFrame):
             self.status_label.setText("没有可解析的占位符")
 
     def _on_rename(self):
-        """按 {首选家族名} {字重} {字宽} {版本} 重命名载入字体的文件。
+        """按各字体的「重命名模板」列重命名载入字体的文件；模板为空则不重命名。
 
         重命名前先释放预览对字体的 QFontDatabase 注册（避免本进程占用锁）；
         其他程序占用导致的失败会逐个报告，不中断整批。
@@ -401,8 +403,7 @@ class EditorFrame(QFrame):
                             position=InfoBarPosition.TOP, duration=3000)
             return
         renamed, skipped, errors = rename_entries(
-            entries, template=option.rename_template.value,
-            release_font=self.preview.release_font,
+            entries, release_font=self.preview.release_font,
         )
         self.model.set_entries(entries)  # 刷新表格显示新文件名
         parts = [f"重命名 {renamed} 个文件"]

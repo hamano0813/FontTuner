@@ -151,6 +151,8 @@ class FontTableModel(QAbstractTableModel):
             tag = key[1]
             if tag == "fontPath":
                 return entry.display_name()
+            if tag == "renameTemplate":
+                return entry.rename_template
             if tag == "weight":
                 return entry.us_weight_class
             if tag == "width":
@@ -179,6 +181,8 @@ class FontTableModel(QAbstractTableModel):
                 entry.us_width_class = value
             elif tag == "italic":
                 entry.set_italic(value)
+            elif tag == "renameTemplate":
+                entry.rename_template = str(value)
         elif kind == "save":
             entry.save_langs[key[1]] = bool(value)
         elif kind == "temp":

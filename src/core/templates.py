@@ -26,6 +26,7 @@ class VendorTemplate:
     translations: dict[str, dict[str, dict]] = field(default_factory=dict)
     # lang_key("SC"/"TC"/"JA"/"EN") -> {"weight": {value: label}, "width": {...}, "italic": {bool: label}}
     # 捆绑该厂商的字重/字宽/斜体标签；应用模板时写入全局翻译字典并持久化
+    rename_template: str = ""   # 重命名模板（含 {占位符}；空=应用时不重命名）
 
 
 def load_templates(path: str | None = None) -> list[VendorTemplate]:
@@ -94,6 +95,8 @@ def apply_template(entry: FontEntry, tmpl: VendorTemplate) -> None:
     for lang in LANGS:
         if entry.save_langs[lang]:
             entry.names[lang][2] = subfamily
+    # 重命名模板：模板内为空则写空（不重命名），非空则填入占位符模板
+    entry.rename_template = tmpl.rename_template or ""
 
 
 def apply_translations(tmpl: VendorTemplate) -> int:

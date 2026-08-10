@@ -59,11 +59,6 @@ class Option(QConfig):
     # 字体预览的字号（点），由预览面板 spinbox 调节
     preview_font_size = ConfigItem("OPTION", "PREVIEW_FONT_SIZE", 24, RangeValidator(8, 72))
 
-    # 字体文件重命名模板，{字段_xx} 按字体动态替换（xx=sc/tc/jp/en）
-    rename_template = ConfigItem(
-        "OPTION", "RENAME_TEMPLATE", "{preferred_family_sc} {weight_sc} {width_sc} {version_sc}"
-    )
-
 
 option = Option()
 qconfig.load(str(CONFIG_PATH), option)

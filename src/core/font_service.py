@@ -55,6 +55,7 @@ def load_entries(paths: Iterable[str], progress: ProgressFn | None = None) -> tu
 
 # ---------------------------------------------------------------- 重命名
 
+# 旧全局默认重命名模板（迁移到各模板的 rename_template 字段前的默认值，仅作参考）
 DEFAULT_RENAME_TEMPLATE = "{preferred_family_sc} {weight_sc} {width_sc} {version_sc}"
 _NAME_PRIORITY = ("SC", "TC", "JA", "EN")   # 旧占位符 首选家族名：简>繁>日>英
 _FIELD_PRIORITY = ("EN", "SC", "TC", "JA")  # 旧占位符 字重/字宽/版本：英>简>繁>日
@@ -156,14 +157,29 @@ def _build_filename(entry: FontEntry, template: str) -> str | None:
     return text
 
 
-def rename_entries(entries, template: str | None = None,
-                   release_font: Callable[[str], None] | None = None) -> tuple[int, int, list[tuple[str, str]]]:
-    """按重命名模板重命名载入字体的文件，按文件分组（集合文件一次一个文件名）。
+def resolve_rename_template(entry: FontEntry) -> bool:
+    """把 entry.rename_template 的 {占位符} 就地解析为最终文件名文本。
 
+    无占位符或解析不出（如模板引用家族名但字体全无）时不改动，返回 False。
+    解析结果带扩展名，与重命名时 _build_filename 产出一致，可直接编辑。
+    """
+    tpl = (entry.rename_template or "").strip()
+    if not tpl or "{" not in tpl:
+        return False
+    text = _build_filename(entry, tpl)
+    if text is None or text == tpl:
+        return False
+    entry.rename_template = text
+    return True
+
+
+def rename_entries(entries, release_font: Callable[[str], None] | None = None) -> tuple[int, int, list[tuple[str, str]]]:
+    """按各字体的重命名模板（entry.rename_template）重命名载入字体的文件。
+
+    模板为空 → 该文件跳过（不重命名）。按文件分组（集合文件一次一个文件名）。
     release_font(path)：重命名前释放应用对该字体的注册（解除本进程占用锁）。
     返回 (renamed, skipped, errors)；errors 为 (旧路径, 错误信息)。
     """
-    template = template or DEFAULT_RENAME_TEMPLATE
     grouped: dict[str, list[FontEntry]] = defaultdict(list)
     for entry in entries:
         grouped[entry.font_path].append(entry)
@@ -171,6 +187,10 @@ def rename_entries(entries, template: str | None = None,
     renamed = skipped = 0
     errors: list[tuple[str, str]] = []
     for path, group in grouped.items():
+        template = (group[0].rename_template or "").strip()
+        if not template:
+            skipped += 1  # 重命名模板为空：不重命名
+            continue
         try:
             new_name = _build_filename(group[0], template)
             if new_name is None:
