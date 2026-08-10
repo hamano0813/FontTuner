@@ -244,8 +244,14 @@ class FontManagerFrame(QFrame):
         item.setData(0, Qt.ItemDataRole.UserRole + 3, bool(node.get("installed")))
         item.setData(0, Qt.ItemDataRole.UserRole + 4, win_name)  # Windows 标准字体名
         item.setData(0, Qt.ItemDataRole.UserRole + 5, node.get("en_name") or "")  # 英文系统名（隐藏匹配词）
+        item.setData(0, Qt.ItemDataRole.UserRole + 6, bool(node.get("is_font")))  # 是否字体文件
         installed_user_path = node.get("installed_user_path") or ""
-        if node["is_font"] and node["installed"]:
+        if node.get("is_font_face"):
+            # TTC/OTC 内的 face 子节点：仅展示，不可勾选（只能勾选整个集合文件）
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+            item.setToolTip(0, win_name or node["family"] or node["name"])
+            item.setForeground(0, QColor("#9a9a9a"))  # 弱化，区别于可注册项
+        elif node["is_font"] and node["installed"]:
             # 系统已装：灰显标记，不提供勾选，避免误卸系统字体
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             item.setText(0, f"{node['name']}（系统已安装）")
@@ -279,8 +285,8 @@ class FontManagerFrame(QFrame):
         if not path:
             return
         state = item.checkState(0)
-        if item.childCount() > 0:
-            # 目录：把勾选态传播到整棵子树，再统一注册/注销（只弹一条汇总）
+        if item.childCount() > 0 and not item.data(0, Qt.ItemDataRole.UserRole + 6):
+            # 目录（非字体文件）：把勾选态传播到整棵子树，再统一注册/注销（只弹一条汇总）
             if state == Qt.CheckState.Checked:
                 self._set_descendants_checked(item, True)
                 self._sync_registration()
@@ -289,9 +295,10 @@ class FontManagerFrame(QFrame):
                 self._sync_registration()
             # PartiallyChecked 是程序回填的展示态，不响应
         elif item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+            # 字体文件（含 TTC/OTC 整体）：勾选即注册整个文件
             self._toggle_font(item, state == Qt.CheckState.Checked)
         else:
-            return  # 已装字体不可勾选
+            return  # 已装字体/face 子节点不可勾选
         self._update_ancestors(item)
         self._update_status()
 
@@ -338,7 +345,7 @@ class FontManagerFrame(QFrame):
                     0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
 
     def _collect_checked_fonts(self) -> set[str]:
-        """遍历整棵树，收集所有已勾选的字体叶子路径。"""
+        """遍历整棵树，收集所有已勾选的字体文件路径（含 TTC/OTC 整体勾选，目录除外）。"""
         checked: set[str] = set()
 
         def walk(item):
@@ -346,8 +353,9 @@ class FontManagerFrame(QFrame):
                 child = item.child(i)
                 if child.childCount() > 0:
                     walk(child)
-                elif (child.flags() & Qt.ItemFlag.ItemIsUserCheckable
-                      and child.checkState(0) == Qt.CheckState.Checked):
+                if (child.flags() & Qt.ItemFlag.ItemIsUserCheckable
+                        and child.checkState(0) == Qt.CheckState.Checked
+                        and child.data(0, Qt.ItemDataRole.UserRole + 6)):
                     path = child.data(0, Qt.ItemDataRole.UserRole)
                     if path:
                         checked.add(path)
@@ -413,6 +421,39 @@ class FontManagerFrame(QFrame):
                 if win:
                     seen.setdefault(win, child.data(0, Qt.ItemDataRole.UserRole + 5) or "")
 
+    def _check_font_nodes_by_name(self, names: set[str]) -> None:
+        """按标准字体名（win_name）自动勾选对应字体文件节点。
+
+        独立 .ttf/.otf 节点命中则直接勾选；TTC/OTC 内的 face 子节点命中则勾选其
+        TTC 母节点（注册整个集合文件）。批量勾选后统一走 _sync_registration 注册。
+        """
+        if not names:
+            return
+        self.tree.blockSignals(True)
+        for i in range(self.tree.topLevelItemCount()):
+            self._check_node_by_name(self.tree.topLevelItem(i), names)
+        for i in range(self.tree.topLevelItemCount()):
+            self._recompute_dir_states(self.tree.topLevelItem(i))
+        self.tree.blockSignals(False)
+        self._sync_registration()
+
+    def _check_node_by_name(self, item, names: set[str]) -> None:
+        """递归勾选：字体文件（含 TTC 整体）按自身 win_name 匹配；face 子节点按其 win_name 勾选母节点。"""
+        win = item.data(0, Qt.ItemDataRole.UserRole + 4) \
+            or item.data(0, Qt.ItemDataRole.UserRole + 1) or ""
+        if item.data(0, Qt.ItemDataRole.UserRole + 6):
+            # 独立字体 / TTC 整体：命中即勾选（仅可勾选节点）
+            if win in names and item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                item.setCheckState(0, Qt.CheckState.Checked)
+        elif item.parent() is not None and win in names:
+            # face 子节点：命中即勾选其母节点（TTC/OTC 整体）
+            parent = item.parent()
+            if (parent.data(0, Qt.ItemDataRole.UserRole + 6)
+                    and parent.flags() & Qt.ItemFlag.ItemIsUserCheckable):
+                parent.setCheckState(0, Qt.CheckState.Checked)
+        for i in range(item.childCount()):
+            self._check_node_by_name(item.child(i), names)
+
     def _on_subtitle_adapt(self):
         """字幕字体适配：选 .ass/.ssa，把用到的字体名批量替换为当前字体库中的字体。"""
         paths, _ = QFileDialog.getOpenFileNames(
@@ -450,6 +491,10 @@ class FontManagerFrame(QFrame):
             InfoBar.info("未做替换", "未选择任何替换字体，字幕保持不变。",
                          parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
             return
+
+        # 自动勾选替换目标字体：独立 .ttf/.otf 直接勾选；TTC/OTC face 命中勾选其母节点；
+        # 留空（未替换）的字体不额外勾选任何节点
+        self._check_font_nodes_by_name(set(mapping.values()))
 
         # 批量替换并写回原文件
         changed_files = 0
@@ -492,12 +537,13 @@ class FontManagerFrame(QFrame):
         self._update_status()
 
     def _apply_saved_checked(self, item, paths: set[str]) -> None:
-        """递归：字体叶子按 paths 勾选/取消；目录节点不动，稍后统一回填三态。"""
+        """递归：字体文件（含 TTC/OTC 整体）按 paths 勾选/取消；目录不动，稍后统一回填三态。"""
         for i in range(item.childCount()):
             child = item.child(i)
             if child.childCount() > 0:
                 self._apply_saved_checked(child, paths)
-            elif child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+            if (child.flags() & Qt.ItemFlag.ItemIsUserCheckable
+                    and child.data(0, Qt.ItemDataRole.UserRole + 6)):
                 path = child.data(0, Qt.ItemDataRole.UserRole)
                 key = os.path.normcase(os.path.abspath(path)) if path else ""
                 child.setCheckState(
@@ -574,7 +620,7 @@ class FontManagerFrame(QFrame):
                 child = item.child(i)
                 if child.childCount() > 0:
                     walk(child)
-                elif child.data(0, Qt.ItemDataRole.UserRole) in paths:
+                if child.data(0, Qt.ItemDataRole.UserRole) in paths:
                     child.setCheckState(0, Qt.CheckState.Unchecked)
 
         for i in range(self.tree.topLevelItemCount()):
@@ -637,13 +683,14 @@ class FontManagerFrame(QFrame):
         seen_families: set = set()
 
         def walk(it):
-            if it.childCount() > 0:
+            if it.childCount() > 0 and not it.data(0, Qt.ItemDataRole.UserRole + 6):
+                # 目录：展开到字体文件；TTC/OTC 整体（is_font）作为单个字体处理
                 for i in range(it.childCount()):
                     walk(it.child(i))
                 return
             path = it.data(0, Qt.ItemDataRole.UserRole)
             if not path or it.data(0, Qt.ItemDataRole.UserRole + 3):
-                return  # 系统已装字体不提供安装/卸载
+                return  # face 子节点/系统已装字体不提供安装/卸载
             installed_path = it.data(0, Qt.ItemDataRole.UserRole + 2)
             family = it.data(0, Qt.ItemDataRole.UserRole + 1) or \
                 os.path.splitext(os.path.basename(path))[0]
@@ -804,16 +851,14 @@ class FontManagerFrame(QFrame):
     # ---------------------------------------------------------------- 底部预览
 
     def _on_current_item_changed(self, current, previous):
-        """选中字体叶子时用该字体渲染 4 行预览文字（含已安装到当前用户的字体）。"""
+        """选中字体文件时用该字体渲染 4 行预览文字（含 TTC/OTC 整体与已安装到当前用户）。"""
         if current is None:
             self._clear_preview()
             return
         path = current.data(0, Qt.ItemDataRole.UserRole)
         installed_path = current.data(0, Qt.ItemDataRole.UserRole + 2)
-        is_font_leaf = current.childCount() == 0 and (
-            current.flags() & Qt.ItemFlag.ItemIsUserCheckable or bool(installed_path))
-        if not path or not is_font_leaf:
-            self._clear_preview()
+        if not path or not current.data(0, Qt.ItemDataRole.UserRole + 6):
+            self._clear_preview()  # 目录与 TTC face 子节点不预览
             return
         # 已安装到当前用户的字体读本地副本预览（更快，且库盘（如 RaiDrive）离线也能预览）
         self._preview_font(installed_path or path)
