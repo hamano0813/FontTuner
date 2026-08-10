@@ -25,7 +25,7 @@ class MainWindow(MSFluentWindow):
         self.resize(1440, 720)
         self.setMinimumSize(960, 600)
 
-        # 启动画面（参考 srw_alpha）：qfw SplashScreen 铺满窗口，构建各页面期间常驻
+        # 启动画面：qfw SplashScreen 铺满窗口，构建各页面期间常驻
         size = QSize(self.width(), self.height())
         self.splash = SplashScreen(
             QIcon(QPixmap(":/splash.png").scaled(
@@ -78,7 +78,7 @@ class MainWindow(MSFluentWindow):
         self._dirty = False
 
     def _center_on_screen(self) -> None:
-        """初始化窗口位置为当前屏幕居中（参考 srw_alpha 的 init_pos）。
+        """初始化窗口位置为当前屏幕居中。
 
         用 frameGeometry 计算，避免 MSFluentWindow 的 4px 边框使窗口右缘偏出 2px。
         """

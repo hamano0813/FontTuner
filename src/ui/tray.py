@@ -2,7 +2,7 @@
 
 配合 MainWindow 的 closeEvent：点关闭按钮 → 最小化到托盘（程序仍运行），
 托盘菜单「显示主界面」重新打开、「退出」才真正退出（经 closeEvent 处理未保存后放行）。
-菜单与点击样式参照 srw_alpha 的 qfw SystemTrayMenu 写法。
+菜单与点击样式参照 qfw 的 SystemTrayMenu 写法。
 """
 
 from __future__ import annotations

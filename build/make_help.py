@@ -1,4 +1,4 @@
-"""把 README.md 编译为 res/html/help.html（参考 srw_alpha 的 translate.bat）。
+"""把 README.md 编译为 res/html/help.html。
 
 用 pandoc --embed-resources 把 shields 徽章内嵌为 data URI（离线可用），
 配合自定义模板（res/html/template.html，仅 $body$）产出纯 body fragment：

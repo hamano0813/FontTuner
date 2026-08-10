@@ -1,6 +1,6 @@
 """拾字 FontTuner 一键发布脚本
 
-参考 srw_alpha 的 build/build_release.py：编号步骤编排、版本号从 pyproject.toml 读取、
+采用编号步骤编排，版本号从 pyproject.toml 读取、
 dist/ 最终只保留发布产物。分发模型为「源码编译为 .pyc + uv 工具链」，由 Inno Setup
 安装器在安装时在线装 Python 与依赖（安装包小，安装需联网）。
 

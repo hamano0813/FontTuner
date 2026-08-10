@@ -1,7 +1,7 @@
 """设置页「版权信息」卡片（含检查更新按钮）：显示版权与当前版本，点击检查更新 →
 查 GitHub 最新 → 下载 v{version}.zip → 调 update.exe 重启。
 
-参照 srw_alpha 的 UpdatePushSettingCard（标题 About、内容版权、按钮 Update），
+仿 qfw 的 UpdatePushSettingCard（标题 About、内容版权、按钮 Update），
 但改为硬编码中文（FontTuner 设置页无 tr() 机制）。
 """
 

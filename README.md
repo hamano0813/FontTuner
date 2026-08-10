@@ -68,7 +68,7 @@ uv run python -B src/main.py
 
 ## 发布构建
 
-一键脚本仿 [srw_alpha](https://github.com/hamano0813/SRW_Alpha) 的发布方案，走 **Inno Setup 安装器 + 在线部署**（安装时经 uv 下载 Python 并同步依赖，安装包小、无需预装 Python）：
+一键脚本走 **Inno Setup 安装器 + 在线部署**方案（安装时经 uv 下载 Python 并同步依赖，安装包小、无需预装 Python）：
 
 ```bash
 build.bat        # 即 uv run build/build_release.py
@@ -87,6 +87,17 @@ build.bat        # 即 uv run build/build_release.py
 - [PySide6](https://doc.qt.io/qtforpython/)（Qt 6 GUI）
 - [PySide6-Fluent-Widgets](https://github.com/zhiyiYo/PySide6-Fluent-Widgets)（Fluent 设计组件）
 - [fontTools](https://github.com/fonttools/fonttools)（字体解析 / TTC 打包解包）
+
+---
+
+## 支持
+
+如果这个工具对你有所帮助，欢迎扫描下方二维码支持一下。捐赠无条件、无额外功能、无任何承诺，纯粹的支持与鼓励。
+
+</br>
+
+<!-- markdownlint-disable-next-line MD033 -->
+<img src="res/img/bill.png" width="400" alt="收款码">
 
 ---
 
