@@ -77,20 +77,18 @@ class _LangFieldTab(ScrollArea):
         grid.setColumnStretch(1, 1)
         outer.addLayout(grid)
 
-        # ---- 该语言的翻译：左字重卡，右字宽卡+斜体卡（纵向叠放）----
+        # ---- 该语言的翻译：左字重卡（跨 3 行），右字宽卡+斜体卡（各占一行一列）----
         outer.addSpacing(8)
         outer.addWidget(BodyLabel("字重 / 字宽 / 斜体翻译", content))
-        cards_row = QHBoxLayout()
-        cards_row.setSpacing(12)
-        cards_row.addWidget(self._make_trans_card(content, lang, "weight"), 1)
-        right = QWidget(content)
-        right_box = QVBoxLayout(right)
-        right_box.setSpacing(12)
-        right_box.addWidget(self._make_trans_card(content, lang, "width"))
-        right_box.addWidget(self._make_trans_card(content, lang, "italic"))
-        right_box.addStretch(1)
-        cards_row.addWidget(right, 1)
-        outer.addLayout(cards_row)
+        cards_grid = QGridLayout()
+        cards_grid.setSpacing(12)
+        cards_grid.addWidget(self._make_trans_card(content, lang, "weight"), 0, 0, 3, 1)
+        cards_grid.addWidget(self._make_trans_card(content, lang, "width"), 0, 1)
+        cards_grid.addWidget(self._make_trans_card(content, lang, "italic"), 1, 1)
+        cards_grid.setRowStretch(2, 1)   # 第 3 行为空行并撑开，卡片整体贴顶
+        cards_grid.setColumnStretch(0, 1)
+        cards_grid.setColumnStretch(1, 1)
+        outer.addLayout(cards_grid)
         outer.addStretch(1)
 
         self.setWidget(content)
@@ -102,6 +100,7 @@ class _LangFieldTab(ScrollArea):
         """单个翻译卡（字重/字宽/斜体）：`值 · EN 默认标签 | 输入框` 行。"""
         title = {"weight": "字重", "width": "字宽", "italic": "斜体"}[kind]
         card = HeaderCardWidget(title, parent)
+        card.viewLayout.setContentsMargins(16, 16, 16, 16)  # 内边距比默认 24 收窄
         body = QWidget(card)
         grid = QGridLayout(body)
         grid.setSpacing(10)
@@ -114,7 +113,9 @@ class _LangFieldTab(ScrollArea):
                 else translations.width_labels("EN")
             )
         for row, value in enumerate(values):
-            grid.addWidget(CaptionLabel(self._trans_caption(kind, value), body), row, 0)
+            label = CaptionLabel(self._trans_caption(kind, value), body)
+            label.setFixedWidth(120)  # 标签列固定宽度，输入框列吃剩余空间
+            grid.addWidget(label, row, 0)
             edit = LineEdit(body)
             self.trans_edits[(kind, value)] = edit
             grid.addWidget(edit, row, 1)
@@ -167,7 +168,7 @@ class TemplateDialog(MessageBoxBase):
         self.yesButton.setText("保存")
         self.cancelButton.setText("取消")
 
-        self.widget.setMinimumWidth(640)
+        self.widget.setMinimumWidth(860)
         self._load(template or VendorTemplate(name=""))
 
     def _load(self, template: VendorTemplate) -> None:
