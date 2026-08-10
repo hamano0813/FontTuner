@@ -1,7 +1,7 @@
 """解包/打包：TTC/OTC 集合 ⇄ 独立 TTF/OTF 文件。
 
 解包：集合文件逐个子字体保存为独立文件，扩展名按内容判定（含 CFF 表 → .otf，否则 .ttf），
-      输出名用字体内名称（家族名-字重），重名追加 _2/_3。
+      输出名用字体内名称（首选家族名-首选子家族名），重名追加 _2/_3。
 打包：多个单字体文件合并为一个集合文件，格式可选 自动/ttc/otc。
 注意：保存后必须 close() 字体，否则 Windows 会锁住源文件。
 """
@@ -48,9 +48,9 @@ def _name_record(font, *name_ids: int) -> str:
 
 
 def unpack_filename(font, index: int) -> str:
-    """字体内名称：家族名(16→1) + '-' + 子家族名(2→17)，清洗非法字符。全空回退 font{index}。"""
+    """字体内名称：首选家族名(16→1) + '-' + 首选子家族名(17→2)，清洗非法字符。全空回退 font{index}。"""
     family = _name_record(font, 16, 1)
-    sub = _name_record(font, 2, 17)
+    sub = _name_record(font, 17, 2)
     text = f"{family}-{sub}" if family and sub else (family or sub)
     text = _ILLEGAL.sub("", text)
     text = re.sub(r"\s+", " ", text).strip(" .")

@@ -1,6 +1,6 @@
 """解包/打包页：TTC/OTC 集合解包为独立 TTF/OTF；多个 TTF/OTF 打包为集合。
 
-解包支持勾选子字体；输出用字体内名称命名（家族名-字重）。
+解包支持勾选子字体；输出用字体内名称命名（首选家族名-首选子家族名）。
 打包格式可选 自动/ttc/otc。后台线程 + 进度条，复刻字体编辑页 worker 模式。
 """
 
@@ -125,7 +125,7 @@ class PackageFrame(QFrame):
         dir_row.addWidget(browse)
         v.addLayout(dir_row)
 
-        name_hint = CaptionLabel("输出以字体内部名称（家族名-字重）命名，重名时自动追加序号。", panel)
+        name_hint = CaptionLabel("输出以字体内部名称（首选家族名-首选子家族名）命名，重名时自动追加序号。", panel)
         v.addWidget(name_hint)
 
         run_row = QHBoxLayout()
