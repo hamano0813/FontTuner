@@ -1,4 +1,4 @@
-"""MPV 联动：生成并写入 sub-ass-fonts.lua 到 mpv scripts 目录。
+"""MPV 联动：生成并写入 sub-font-tuner.lua 到各 mpv 副本 scripts 目录。
 
 Lua 脚本在 MPV 加载视频时：
 1. 从 track-list 取 ASS 字幕 URL → curl 拉取内容 → 解析用到的字体名；
@@ -36,12 +36,21 @@ local LINK_DIR = "@LINK_DIR@"
 -- cmd 的 copy/del 只认反斜杠路径，转一份反斜杠副本供命令行用
 local LINK_BS = LINK_DIR:gsub("/", "\\")
 
--- 日志写到脚本同目录 sub-ass-fonts.log
+-- 日志开关：由 FontTuner 设置页控制（false 时脚本不输出任何日志）
+local LOG_ENABLE = @LOG_ENABLE@
+
+-- 日志写到脚本同目录 sub-font-tuner.log
 local _src = debug.getinfo(1, "S").source or ""
 local _script_dir = _src:sub(2):match("^(.*)[/\\][^/\\]+$") or "."
-local _log = io.open(_script_dir .. "/sub-ass-fonts.log", "a")
+local _log = nil
+if LOG_ENABLE then
+    _log = io.open(_script_dir .. "/sub-font-tuner.log", "a")
+end
 
 local function log(level, text)
+    if not LOG_ENABLE then
+        return
+    end
     msg[level](text)
     if _log then
         _log:write(string.format("%s [%s] %s\n",
@@ -353,24 +362,40 @@ end)
 '''
 
 
-def write_script(scripts_dir: str, link_dir: str) -> tuple[bool, str]:
-    """把联动 Lua 脚本写入 scripts_dir/sub-ass-fonts.lua。
+def write_script(
+    scripts_dirs: list[str], link_dir: str, log_enable: bool = True,
+) -> tuple[bool, str]:
+    """把联动 Lua 脚本写入各 mpv 副本 scripts 目录（scripts_dirs 逐个写入）。
 
-    返回 (ok, 消息)。失败消息为原因，成功消息为写入的完整路径。
+    返回 (ok, 消息)：全部成功 ok=True 并列出写入路径；全部失败/未配置目录
+    ok=False 并给出原因；部分失败 ok=False 并分别列出成功与失败的目录。
+    log_enable 控制脚本是否输出日志（mpv 控制台与脚本同目录 sub-font-tuner.log）。
     """
-    if not scripts_dir or not os.path.isdir(scripts_dir):
-        return False, "MPV 脚本目录无效"
     if not link_dir:
         return False, "请先设置硬链接目录"
+    dirs = [d for d in (scripts_dirs or []) if d]
+    if not dirs:
+        return False, "请先设置 MPV 脚本目录"
     script = (
         _LUA_TEMPLATE
         .replace("@CACHE_PATH@", str(_CACHE_PATH).replace("\\", "/"))
         .replace("@LINK_DIR@", link_dir.replace("\\", "/"))
+        .replace("@LOG_ENABLE@", "true" if log_enable else "false")
     )
-    path = os.path.join(scripts_dir, "sub-ass-fonts.lua")
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(script)
-    except OSError as exc:
-        return False, str(exc)
-    return True, path
+    written, failed = [], []
+    for d in dirs:
+        if not os.path.isdir(d):
+            failed.append(f"{d}（目录不存在）")
+            continue
+        path = os.path.join(d, "sub-font-tuner.lua")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(script)
+            written.append(path)
+        except OSError as exc:
+            failed.append(f"{d}（{exc}）")
+    if not written:
+        return False, "；".join(failed) or "写入失败"
+    if failed:
+        return False, "部分写入成功：" + "；".join(written) + "；失败：" + "；".join(failed)
+    return True, "；".join(written)

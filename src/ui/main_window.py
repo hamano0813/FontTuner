@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import MSFluentWindow, MessageBox, NavigationItemPosition, SplashScreen
 
+from config import option
 from core.updater import read_version
 from ui.editor.frame import EditorFrame
 from ui.fontmgr.frame import FontManagerFrame
@@ -107,35 +108,16 @@ class MainWindow(MSFluentWindow):
         QTimer.singleShot(0, self.close)
 
     def closeEvent(self, e: QCloseEvent):
-        if self._quitting:
-            # 真正退出：先处理未保存，确认后才放行（取消则恢复标志并保持运行）
-            if self._dirty:
-                # 托盘态窗口已隐藏：先显示窗口，确认框才有可见父窗口。
-                # 否则模态框以隐藏窗口为 owner，Windows 不激活/显示它，box.exec()
-                # 空转导致退出卡死。
-                if not self.isVisible():
-                    self.show()
-                    self.raise_()
-                    self.activateWindow()
-                box = MessageBox("未保存的修改", "有修改尚未保存，确定退出吗？", self)
-                box.yesButton.setText("退出")
-                box.cancelButton.setText("取消")
-                if not box.exec():
-                    self._quitting = False
-                    e.ignore()
-                    return
-            super().closeEvent(e)
-            # 托盘态窗口已隐藏，Qt「最后可见窗口关闭才退出」不会触发，
-            # 必须显式退出事件循环，否则程序仍驻留托盘
-            QApplication.instance().quit()
+        # 托盘「退出」菜单，或关闭按钮在未开启「关闭到系统托盘」时 → 真正退出
+        if self._quitting or not option.close_to_tray.value:
+            self._quit(e)
             return
 
+        # 点关闭按钮（开启「关闭到系统托盘」）→ 最小化到托盘，程序仍在运行
         if self.tray is None:
             # 托盘尚未就绪（极端时序），保持直接关闭
             super().closeEvent(e)
             return
-
-        # 点关闭按钮 → 最小化到托盘，程序仍在运行
         e.ignore()
         self.hide()
         if not self._tray_notified:
@@ -144,3 +126,29 @@ class MainWindow(MSFluentWindow):
                 "拾字 FontTuner",
                 "程序仍在运行，点击托盘图标可重新打开，右键菜单可退出。",
             )
+
+    def _quit(self, e: QCloseEvent) -> None:
+        """真正退出：先处理未保存，确认后才放行并退出事件循环。
+
+        取消时恢复 _quitting 标志（仅托盘「退出」路径会置真），并忽略关闭事件
+        保持运行。
+        """
+        if self._dirty:
+            # 托盘态窗口已隐藏：先显示窗口，确认框才有可见父窗口。
+            # 否则模态框以隐藏窗口为 owner，Windows 不激活/显示它，box.exec()
+            # 空转导致退出卡死。
+            if not self.isVisible():
+                self.show()
+                self.raise_()
+                self.activateWindow()
+            box = MessageBox("未保存的修改", "有修改尚未保存，确定退出吗？", self)
+            box.yesButton.setText("退出")
+            box.cancelButton.setText("取消")
+            if not box.exec():
+                self._quitting = False
+                e.ignore()
+                return
+        super().closeEvent(e)
+        # 托盘态窗口已隐藏，Qt「最后可见窗口关闭才退出」不会触发，
+        # 必须显式退出事件循环，否则程序仍驻留托盘
+        QApplication.instance().quit()

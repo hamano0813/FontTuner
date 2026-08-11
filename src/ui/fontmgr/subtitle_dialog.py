@@ -23,6 +23,7 @@ from qfluentwidgets import (
     TableWidget,
     isDarkTheme,
 )
+from qfluentwidgets.common.smooth_scroll import SmoothMode
 
 
 class SearchableComboBox(QComboBox):
@@ -40,6 +41,7 @@ class SearchableComboBox(QComboBox):
         self._view_styled: bool = False
 
         self.setEditable(True)
+        self.lineEdit().setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)  # 自由输入不插入为选项
         self.setCompleter(None)  # 禁用自动完成，避免补全干扰手动输入（VAS 同款）
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -253,6 +255,9 @@ class SubtitleFontDialog(MessageBoxBase):
             f"未匹配的默认留空（不替换）。可输入中文名或英文系统名过滤查找。", self)
 
         self.table = TableWidget(self)
+        # 禁用平滑滚动（NO_SMOOTH），行数多时滚动更跟手
+        self.table.scrollDelagate.verticalSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
+        self.table.scrollDelagate.horizonSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
         self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(["字幕中的字体名", "替换为（留空 = 不替换）"])
         self.table.setRowCount(len(subtitle_fonts))

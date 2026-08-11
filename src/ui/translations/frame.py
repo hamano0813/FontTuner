@@ -1,5 +1,6 @@
 """字重/字宽/斜体翻译页：按语言分 Tab 编辑各语言标签，保存后对已加载字体立即生效。"""
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -92,6 +93,7 @@ class _LangTab(ScrollArea):
         for row, value in enumerate(values):
             grid.addWidget(CaptionLabel(label_fn(value), body), row, 0)
             edit = LineEdit(body)
+            edit.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
             edit.setText(getter_fn(value))
             self.edits[key_fn(value)] = edit
             grid.addWidget(edit, row, 1)

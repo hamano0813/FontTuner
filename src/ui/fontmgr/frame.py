@@ -38,6 +38,7 @@ from qfluentwidgets import (
     isDarkTheme,
     qconfig,
 )
+from qfluentwidgets.common.smooth_scroll import SmoothMode
 
 from config import option
 from core import font_register, subtitle_font
@@ -94,6 +95,9 @@ class FontManagerFrame(QFrame):
         self.folders_card.rescanRequested.connect(self._on_rescan)
 
         self.tree = TreeWidget(self)
+        # 禁用平滑滚动（NO_SMOOTH），长目录列表滚动更跟手
+        self.tree.scrollDelagate.verticalSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
+        self.tree.scrollDelagate.horizonSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
         self.tree.setColumnCount(2)
         self.tree.setHeaderLabels(["字体文件（勾选即注册到 Windows）", "Windows 标准字体名"])
         header = self.tree.header()
@@ -110,6 +114,7 @@ class FontManagerFrame(QFrame):
 
         # 筛选框：按名称/家族名过滤树内容（QTreeWidgetItem 重勾选/三态，手动 show/hide 过滤）
         self.filter_edit = SearchLineEdit(self)
+        self.filter_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
         self.filter_edit.setPlaceholderText("筛选字体…")
         self.filter_edit.setClearButtonEnabled(True)
         self.filter_edit.textChanged.connect(self._apply_filter)
@@ -836,6 +841,12 @@ class FontManagerFrame(QFrame):
             act = Action(FIF.DELETE, "取消安装" if n == 1 else f"取消安装（{n} 个）", menu)
             act.triggered.connect(lambda: self._on_uninstall_from_user(list(to_uninstall)))
             menu.addAction(act)
+        if sendable:
+            menu.addSeparator()
+            n = len(sendable)
+            act = Action(FIF.DELETE, "删除字体文件" if n == 1 else f"删除字体文件（{n} 个）", menu)
+            act.triggered.connect(lambda: self._on_delete_font_files(list(sendable)))
+            menu.addAction(act)
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def _send_to_editor(self, paths: list[str]):
@@ -883,6 +894,68 @@ class FontManagerFrame(QFrame):
             return
         self._userfont_item_map = {p: it for it, f, p in entries}
         self._start_userfont([], [(f, p) for it, f, p in entries])
+
+    def _on_delete_font_files(self, paths: list[str]) -> None:
+        """删除字体文件：确认后从磁盘永久删除，并从树中移除对应节点。"""
+        if not paths:
+            return
+        names = [os.path.basename(p) for p in paths]
+        preview = "\n".join(f"· {n}" for n in names[:8]) + ("\n…" if len(names) > 8 else "")
+        box = MessageBox(
+            "删除字体文件",
+            f"将永久删除 {len(paths)} 个字体文件，此操作不可恢复：\n{preview}",
+            self.window())
+        box.yesButton.setText("删除")
+        box.cancelButton.setText("取消")
+        if not box.exec():
+            return
+        deleted: list[str] = []
+        failed: list[str] = []
+        for p in paths:
+            try:
+                os.remove(p)
+                deleted.append(p)
+            except OSError as exc:
+                failed.append(f"{os.path.basename(p)}（{exc}）")
+        if deleted:
+            self._remove_tree_paths(deleted)
+        if failed:
+            InfoBar.error("删除失败", "；".join(failed), parent=self.window(),
+                          position=InfoBarPosition.TOP, duration=5000)
+        else:
+            InfoBar.success("已删除字体文件", f"共删除 {len(deleted)} 个字体文件",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+
+    def _remove_tree_paths(self, paths: list[str]) -> None:
+        """从树中移除已删除字体文件的节点：清理空目录、刷新目录三态、重套筛选。"""
+        items_by_path = self._items_by_path()
+        self.tree.blockSignals(True)
+        for p in paths:
+            key = os.path.normcase(os.path.abspath(p))
+            item = items_by_path.get(key)
+            if item is None:
+                continue
+            parent = item.parent()
+            if parent is None:
+                idx = self.tree.indexOfTopLevelItem(item)
+                self.tree.takeTopLevelItem(idx)
+            else:
+                idx = parent.indexOfChild(item)
+                parent.takeChild(idx)
+                self._prune_empty_dirs(parent)
+        for i in range(self.tree.topLevelItemCount()):
+            self._recompute_dir_states(self.tree.topLevelItem(i))
+        self.tree.blockSignals(False)
+        self._apply_filter(self.filter_edit.text())
+        self._update_status()
+
+    def _prune_empty_dirs(self, node) -> None:
+        """向上删除没有字体子项的目录节点（不含顶层节点）。"""
+        while node is not None and node.parent() is not None and node.childCount() == 0:
+            parent = node.parent()
+            idx = parent.indexOfChild(node)
+            parent.takeChild(idx)
+            node = parent
 
     def _start_userfont(self, to_install, to_uninstall) -> None:
         if self._register_worker is not None or self._userfont_worker is not None:

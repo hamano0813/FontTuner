@@ -3,6 +3,8 @@
 themeMode / themeColor 由 QConfig 基类提供；这里覆盖 themeMode 默认值为「跟随系统」。
 """
 
+import json
+
 from qfluentwidgets import (
     BoolValidator,
     ConfigItem,
@@ -47,6 +49,9 @@ class Option(QConfig):
         "OPTION", "FONTMGR_AUTO_RESTORE", False, BoolValidator()
     )
 
+    # 关闭窗口时最小化到系统托盘（关 = 直接退出程序）
+    close_to_tray = ConfigItem("OPTION", "CLOSE_TO_TRAY", True, BoolValidator())
+
     # 字体预览的样例文字（PlainTextEdit 内容），重启后保留；一行一个语言
     preview_sample = ConfigItem(
         "OPTION", "PREVIEW_SAMPLE",
@@ -59,10 +64,23 @@ class Option(QConfig):
     # 字体预览的字号（点），由预览面板 spinbox 调节
     preview_font_size = ConfigItem("OPTION", "PREVIEW_FONT_SIZE", 24, RangeValidator(8, 72))
 
-    # MPV 联动：字体硬链接目录（与字体库同盘），及 mpv/Jellyfin 的 scripts 目录
+    # MPV 联动：字体硬链接目录（与字体库同盘），及各 mpv/Jellyfin 副本的 scripts 目录列表
     mpv_link_dir = ConfigItem("OPTION", "MPV_LINK_DIR", "", FolderValidator())
-    mpv_scripts_dir = ConfigItem("OPTION", "MPV_SCRIPTS_DIR", "", FolderValidator())
+    mpv_scripts_dirs = ConfigItem("OPTION", "MPV_SCRIPTS_DIRS", [], FolderListValidator())
+
+    # MPV 联动 Lua 脚本是否输出日志（写入脚本时按此值生成脚本内的开关）
+    mpv_log_enable = ConfigItem("OPTION", "MPV_LOG_ENABLE", True, BoolValidator())
 
 
 option = Option()
 qconfig.load(str(CONFIG_PATH), option)
+
+# 迁移旧版单一 MPV 脚本目录（MPV_SCRIPTS_DIR）到目录列表（MPV_SCRIPTS_DIRS）
+if not option.mpv_scripts_dirs.value and CONFIG_PATH.exists():
+    try:
+        raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        old = (raw.get("OPTION") or {}).get("MPV_SCRIPTS_DIR")
+        if old:
+            qconfig.set(option.mpv_scripts_dirs, [old])
+    except (OSError, ValueError):
+        pass

@@ -32,19 +32,19 @@ def _default_width() -> dict[str, dict[int, str]]:
         lang: {v: (t[_LANG_INDEX[lang]] or t[0] or str(v)) for v, t in FONT_WIDTH.items()}
         for lang in LANGS
     }
-    # 宽度 5（正常）显式补标签
+    # 宽度 5（正常）：不产生宽度词，四种语言默认均空字符
     for lang in LANGS:
-        if not width[lang][5].strip() or width[lang][5] == "5":
-            width[lang][5] = {"EN": "Normal", "SC": "正常", "TC": "正常", "JA": "ノーマル"}[lang]
+        width[lang][5] = ""
     return width
 
 
 def _default_italic() -> dict[str, dict[bool, str]]:
+    # 非斜体（False）：不产生斜体词，四种语言默认均空字符
     return {
-        "EN": {False: "Regular", True: "Italic"},
-        "SC": {False: "正常", True: "斜体"},
-        "TC": {False: "正常", True: "斜體"},
-        "JA": {False: "Regular", True: "イタリック"},
+        "EN": {False: "", True: "Italic"},
+        "SC": {False: "", True: "斜体"},
+        "TC": {False: "", True: "斜體"},
+        "JA": {False: "", True: "I"},
     }
 
 

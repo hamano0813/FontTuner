@@ -36,6 +36,7 @@ from qfluentwidgets import (
     TreeWidget,
     qconfig,
 )
+from qfluentwidgets.common.smooth_scroll import SmoothMode
 
 from config import option
 from core import package
@@ -110,6 +111,9 @@ class PackageFrame(QFrame):
         v.addLayout(top)
 
         self.unpack_tree = TreeWidget(panel)
+        # 禁用平滑滚动（NO_SMOOTH），大量子字体滚动更跟手
+        self.unpack_tree.scrollDelagate.verticalSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
+        self.unpack_tree.scrollDelagate.horizonSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
         self.unpack_tree.setColumnCount(1)
         self.unpack_tree.setHeaderLabels(["集合文件 → 子字体"])
         self.unpack_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -118,6 +122,7 @@ class PackageFrame(QFrame):
         dir_row = QHBoxLayout()
         dir_row.addWidget(BodyLabel("输出目录", panel))
         self.unpack_out_dir = LineEdit(panel)
+        self.unpack_out_dir.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
         self.unpack_out_dir.setReadOnly(True)
         browse = PushButton("浏览…", panel)
         browse.clicked.connect(lambda: self._pick_out_dir(self.unpack_out_dir))
@@ -248,6 +253,7 @@ class PackageFrame(QFrame):
         grid.setHorizontalSpacing(8)
         grid.addWidget(BodyLabel("输出目录", panel), 0, 0)
         self.pack_out_dir = LineEdit(panel)
+        self.pack_out_dir.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
         self.pack_out_dir.setReadOnly(True)
         browse = PushButton("浏览…", panel)
         browse.clicked.connect(lambda: self._pick_out_dir(self.pack_out_dir))
@@ -256,6 +262,7 @@ class PackageFrame(QFrame):
 
         grid.addWidget(BodyLabel("文件名", panel), 1, 0)
         self.pack_name = LineEdit(panel)
+        self.pack_name.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
         self.pack_name.setText("collection")
         self._pack_name_manual = False
         self.pack_name.textEdited.connect(lambda: setattr(self, "_pack_name_manual", True))

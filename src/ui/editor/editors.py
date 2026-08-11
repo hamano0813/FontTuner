@@ -91,6 +91,7 @@ class CellComboEditor(QComboBox, CellEditor):
         QComboBox.__init__(self, parent)
         CellEditor.__init__(self, parent)
         self.setEditable(True)
+        self.lineEdit().setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.setCompleter(None)
         self.setMaxVisibleItems(10)

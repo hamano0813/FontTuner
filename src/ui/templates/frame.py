@@ -71,6 +71,7 @@ class _LangFieldTab(ScrollArea):
         for row, (nid, label) in enumerate(_TEMPLATE_FIELDS):
             grid.addWidget(BodyLabel(label, content), row, 0)
             edit = LineEdit(content)
+            edit.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
             edit.setToolTip(_PLACEHOLDER_HINT)
             edit.installEventFilter(
                 ToolTipFilter(edit, showDelay=300, position=ToolTipPosition.TOP)
@@ -120,6 +121,7 @@ class _LangFieldTab(ScrollArea):
             label.setFixedWidth(120)  # 标签列固定宽度，输入框列吃剩余空间
             grid.addWidget(label, row, 0)
             edit = LineEdit(body)
+            edit.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
             self.trans_edits[(kind, value)] = edit
             grid.addWidget(edit, row, 1)
         grid.setRowStretch(len(values), 1)  # 行少时卡体内整体顶部对齐
@@ -144,6 +146,7 @@ class TemplateDialog(MessageBoxBase):
 
         self.title_label = SubtitleLabel("新建模板" if template is None else "编辑模板", self)
         self.name_edit = LineEdit(self)
+        self.name_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
 
         # 语言页签：简 / 繁 / 日 / 英
         self.segmented = SegmentedWidget(self)
@@ -165,6 +168,7 @@ class TemplateDialog(MessageBoxBase):
         meta_grid.addWidget(self.name_edit, 0, 1)
         meta_grid.addWidget(BodyLabel("重命名模板", self), 1, 0)
         self.rename_edit = LineEdit(self)
+        self.rename_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
         self.rename_edit.setClearButtonEnabled(True)
         self.rename_edit.setPlaceholderText(
             "空 = 应用模板时不重命名；如 {preferred_family_sc} {weight_sc} {width_sc} {version_sc}"
