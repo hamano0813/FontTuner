@@ -15,6 +15,11 @@ _STYLE_SECTIONS = ("v4+ styles", "v4 styles", "v4++ styles")
 _SKIP_SECTIONS = ("fonts", "graphics")
 
 
+def _strip_transpose(name: str) -> str:
+    """去掉字体转置标记 @ 前缀（@MS Gothic → MS Gothic）。"""
+    return name[1:] if name.startswith("@") else name
+
+
 def _section(line: str) -> str | None:
     """若该行为节标题则返回小写节名，否则 None。"""
     s = line.strip()
@@ -55,11 +60,11 @@ def extract_font_names(text: str) -> set[str]:
             if low.startswith("style:") and font_idx is not None:
                 parts = line.split(",")
                 if len(parts) > font_idx:
-                    name = parts[font_idx].strip()
+                    name = _strip_transpose(parts[font_idx].strip())
                     if name:
                         names.add(name)
     for m in re.finditer(r"\{[^}]*?\\fn([^}\\]+)", text):
-        name = m.group(1).strip()
+        name = _strip_transpose(m.group(1).strip())
         if name:
             names.add(name)
     return names
@@ -73,10 +78,12 @@ def _replace_fn_tokens(line: str, mapping: dict[str, str]) -> tuple[str, int]:
 
     def _repl(m):
         nonlocal count
-        new = mapping.get(m.group(1).strip())
+        name = m.group(1).strip()
+        new = mapping.get(_strip_transpose(name))
         if new:
             count += 1
-            return "\\fn" + new
+            # 保留原字体名的转置标记 @，让替换后仍是竖排字体
+            return "\\fn" + ("@" if name.startswith("@") else "") + new
         return m.group(0)
 
     return re.sub(r"\\fn([^}\\]+)", _repl, line), count
@@ -125,8 +132,10 @@ def apply_replacements(text: str, repl: dict[str, str]) -> tuple[str, int]:
             parts = new.split(",")
             if len(parts) > font_idx:
                 old = parts[font_idx].strip()
-                if old in mapping:
-                    parts[font_idx] = mapping[old]
+                key = _strip_transpose(old)
+                if key in mapping:
+                    # 保留转置标记 @，让替换后仍是竖排字体
+                    parts[font_idx] = ("@" if old.startswith("@") else "") + mapping[key]
                     new = ",".join(parts)
                     count += 1
         new, n = _replace_fn_tokens(new, mapping)

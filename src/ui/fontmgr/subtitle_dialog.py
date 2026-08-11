@@ -7,9 +7,10 @@ SearchableComboBox 参考 VAS（C:\\iCode\\VAS\\src\\ui\\table\\editor\\search_c
 """
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
     QHeaderView,
     QSizePolicy,
@@ -235,6 +236,24 @@ class SearchableComboBox(QComboBox):
         return super().eventFilter(obj, event)
 
 
+class _CopyableTable(TableWidget):
+    """适配表：第一列字体名支持复制（选中行 + Ctrl+C），其余行为与 TableWidget 一致。"""
+
+    def keyPressEvent(self, e: QKeyEvent):
+        if e.matches(QKeySequence.StandardKey.Copy):
+            self._copy_column0()
+        else:
+            super().keyPressEvent(e)
+
+    def _copy_column0(self) -> None:
+        """把选中行的第一列（原字体名）按行序去重后复制到剪贴板。"""
+        rows = sorted({idx.row() for idx in self.selectionModel().selectedIndexes()})
+        texts = [self.item(r, 0).text() for r in rows
+                 if self.item(r, 0) is not None]
+        if texts:
+            QApplication.clipboard().setText("\n".join(texts))
+
+
 class SubtitleFontDialog(MessageBoxBase):
     """字幕字体适配：第 1 列只读显示字幕字体名，第 2 列下拉选择替换字体。
 
@@ -254,7 +273,7 @@ class SubtitleFontDialog(MessageBoxBase):
             f"字幕共用到 {len(subtitle_fonts)} 个字体名：与当前字体库完全匹配的已自动预选，"
             f"未匹配的默认留空（不替换）。可输入中文名或英文系统名过滤查找。", self)
 
-        self.table = TableWidget(self)
+        self.table = _CopyableTable(self)
         # 禁用平滑滚动（NO_SMOOTH），行数多时滚动更跟手
         self.table.scrollDelagate.verticalSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
         self.table.scrollDelagate.horizonSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
@@ -263,7 +282,9 @@ class SubtitleFontDialog(MessageBoxBase):
         self.table.setRowCount(len(subtitle_fonts))
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        # 允许选中第一列字体名（SelectItems + 无第二列 item，实际只有第一列可选），Ctrl+C 复制
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
         self.table.setWordWrap(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
