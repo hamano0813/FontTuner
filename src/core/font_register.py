@@ -296,6 +296,14 @@ _CACHE_PATH = DATA_DIR / "fontmgr_cache.json"
 # 缓存结构版本：win_name 语义（家族名优先）与 faces 结构变更时 +1，使旧缓存自动失效重读
 _CACHE_VERSION = 2
 _cache: dict = {}
+# 硬重扫标志：重新扫描按钮置位，使名称读取跳过 mtime/size 缓存，
+# 对已存在的文件也强制重读名称表，并回写刷新缓存条目
+_hard_rescan = False
+
+
+def set_hard_rescan(flag: bool) -> None:
+    global _hard_rescan
+    _hard_rescan = bool(flag)
 
 
 def load_cache() -> None:
@@ -332,7 +340,7 @@ def _cached_names(path: str) -> tuple[str, str, str, str]:
     except OSError:
         return "", "", "", ""
     cached = _cache.get(key)
-    if (cached and cached.get("v") == _CACHE_VERSION
+    if (not _hard_rescan and cached and cached.get("v") == _CACHE_VERSION
             and cached.get("size") == size and cached.get("mtime") == mtime):
         family = cached.get("family") or ""
         subfamily = cached.get("subfamily") or ""
@@ -360,7 +368,7 @@ def _cached_faces(path: str) -> list[dict]:
     except OSError:
         return []
     cached = _cache.get(key)
-    if (cached and cached.get("v") == _CACHE_VERSION
+    if (not _hard_rescan and cached and cached.get("v") == _CACHE_VERSION
             and cached.get("size") == size and cached.get("mtime") == mtime
             and isinstance(cached.get("faces"), list)):
         return cached["faces"]
@@ -395,7 +403,13 @@ def scan_folder_tree(root: str, errors: list) -> dict | None:
     用 os.scandir 枚举（目录项自带 is_dir/is_file，免额外 stat），并走缓存避免重复打开字体。
     """
     try:
-        entries = sorted(os.scandir(root), key=lambda e: e.name)
+        def _dir_first(e):
+            # 文件夹排最前，再按名称排序（is_dir 失败按文件处理）
+            try:
+                return (not e.is_dir(), e.name.casefold())
+            except OSError:
+                return (1, e.name.casefold())
+        entries = sorted(os.scandir(root), key=_dir_first)
     except OSError as exc:
         errors.append((root, str(exc)))
         return None

@@ -79,6 +79,7 @@ class FontManagerFrame(QFrame):
         super().__init__(parent=parent)
         self.setObjectName("FontManagerFrame")
         self._worker = None
+        self._partial_scan = False          # 当前扫描是否仅针对选中项（部分重扫）
         self._register_worker = None
         self._userfont_worker = None
         self._registered: set[str] = set()  # 本会话内由本工具注册过的字体路径
@@ -169,18 +170,38 @@ class FontManagerFrame(QFrame):
     # ---------------------------------------------------------------- 扫描
 
     def _on_rescan(self):
+        """重新扫描（硬扫描）：有选中项则只重扫选中项，无选中则全表重扫。
+
+        硬扫描跳过 mtime/size 缓存，已存在的字体文件也强制重读名称并更新缓存。
+        """
+        selected = self.tree.selectedItems()
+        if selected:
+            paths: list[str] = []
+            seen: set[str] = set()
+            for item in selected:
+                path = item.data(0, Qt.ItemDataRole.UserRole)
+                if not path and item.parent() is not None:
+                    # TTC/OTC face 子节点不可单独重扫：归到其母节点（整个集合文件）
+                    path = item.parent().data(0, Qt.ItemDataRole.UserRole)
+                if path and path not in seen:
+                    seen.add(path)
+                    paths.append(path)
+            if paths:
+                self._start_scan(paths, partial=True, hard=True)
+            return
         folders = list(option.fontmgr_folders.value)
         if folders:
-            self._start_scan(folders)
+            self._start_scan(folders, hard=True)
 
     def _on_folders_changed(self, folders):
-        """字体库目录列表变动（设置页/本页添加）：重新扫描。"""
+        """字体库目录列表变动（设置页/本页添加）：重新扫描（非硬扫描，走缓存）。"""
         self._start_scan(list(folders))
 
-    def _start_scan(self, roots: list[str]) -> None:
+    def _start_scan(self, roots: list[str], partial: bool = False, hard: bool = False) -> None:
         if self._worker is not None:
             return
-        self._worker = ScanWorker(roots, self)
+        self._worker = ScanWorker(roots, self, hard=hard)
+        self._partial_scan = partial
         self.status_label.setText("扫描中…")
         self.folders_card.rescan_button.setEnabled(False)
         self._worker.finished_ok.connect(self._on_scan_finished)
@@ -188,23 +209,82 @@ class FontManagerFrame(QFrame):
         self._worker.start()
 
     def _on_scan_finished(self, tree, errors):
-        self.tree.blockSignals(True)
-        self.tree.clear()
-        for node in tree:
-            root = self._build_item(node)
-            self.tree.addTopLevelItem(root)
-            self._recompute_dir_states(root)  # 按叶子勾选态回填目录三态
-        self.tree.blockSignals(False)
-        self._apply_filter(self.filter_edit.text())  # 重新套用筛选
-        # 首次扫描完成且开启自动恢复：把保存的选中恢复到树中（重新注册）
-        if (not self._auto_restored and option.fontmgr_auto_restore.value
-                and option.fontmgr_saved_selection.value):
-            self._auto_restored = True
-            self._restore_selection(set(option.fontmgr_saved_selection.value))
-        self.status_label.setText(f"已加载 {len(tree)} 个文件夹，勾选字体即可注册到 Windows。")
+        if self._partial_scan:
+            self._apply_partial_scan(tree)
+        else:
+            self.tree.blockSignals(True)
+            self.tree.clear()
+            for node in tree:
+                root = self._build_item(node)
+                self.tree.addTopLevelItem(root)
+                self._recompute_dir_states(root)  # 按叶子勾选态回填目录三态
+            self.tree.blockSignals(False)
+            self._apply_filter(self.filter_edit.text())  # 重新套用筛选
+            # 首次扫描完成且开启自动恢复：把保存的选中恢复到树中（重新注册）
+            if (not self._auto_restored and option.fontmgr_auto_restore.value
+                    and option.fontmgr_saved_selection.value):
+                self._auto_restored = True
+                self._restore_selection(set(option.fontmgr_saved_selection.value))
+            self.status_label.setText(f"已加载 {len(tree)} 个文件夹，勾选字体即可注册到 Windows。")
         if errors:
-            InfoBar.error("部分文件夹扫描失败", f"{len(errors)} 个文件夹：{errors[0][0]}",
+            kind = "项" if self._partial_scan else "文件夹"
+            InfoBar.error(f"部分{kind}扫描失败", f"{len(errors)} 个{kind}：{errors[0][0]}",
                           parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+
+    def _items_by_path(self) -> dict[str, QTreeWidgetItem]:
+        """遍历整棵树，收集 path → 树节点 的映射（face 子节点 path 为空，不入映射）。"""
+        m: dict[str, QTreeWidgetItem] = {}
+
+        def walk(item):
+            path = item.data(0, Qt.ItemDataRole.UserRole)
+            if path:
+                m[os.path.normcase(os.path.abspath(path))] = item
+            for i in range(item.childCount()):
+                walk(item.child(i))
+
+        for i in range(self.tree.topLevelItemCount()):
+            walk(self.tree.topLevelItem(i))
+        return m
+
+    def _apply_partial_scan(self, nodes) -> None:
+        """把部分扫描的节点原位替换到树中：目录整棵重建、字体文件单读替换。
+
+        只动选中项对应节点，其余子树不重建；保持展开态、重算目录三态、套用筛选。
+        """
+        items_by_path = self._items_by_path()
+        replaced = 0
+        for node in nodes:
+            path = node.get("path")
+            if not path:
+                continue
+            key = os.path.normcase(os.path.abspath(path))
+            item = items_by_path.get(key)
+            if item is None:
+                continue
+            expanded = item.isExpanded()
+            parent = item.parent()
+            self.tree.blockSignals(True)
+            new_item = self._build_item(node)
+            if parent is None:
+                idx = self.tree.indexOfTopLevelItem(item)
+                self.tree.takeTopLevelItem(idx)
+                self.tree.insertTopLevelItem(idx, new_item)
+            else:
+                idx = parent.indexOfChild(item)
+                parent.takeChild(idx)
+                parent.insertChild(idx, new_item)
+            new_item.setExpanded(expanded)
+            self._recompute_dir_states(new_item)  # 按叶子勾选态回填目录三态
+            self.tree.blockSignals(False)
+            self._update_ancestors(new_item)  # 刷新祖先目录三态
+            # 该节点整棵重建后，其下后代已被覆盖，后续选中后代节点跳过
+            prefix = key + os.sep
+            for k in [k for k in items_by_path if k.startswith(prefix)]:
+                del items_by_path[k]
+            replaced += 1
+        self._apply_filter(self.filter_edit.text())
+        self._update_status()
+        self.status_label.setText(f"已重新扫描 {replaced} 项")
 
     def _on_worker_finished(self):
         self.folders_card.rescan_button.setEnabled(True)
@@ -239,6 +319,9 @@ class FontManagerFrame(QFrame):
     def _build_item(self, node: dict) -> QTreeWidgetItem:
         win_name = node.get("win_name") or ""
         item = QTreeWidgetItem([node["name"], win_name])
+        # 目录用文件夹图标，字体（含 TTC/OTC 与其 face 子节点）用字体图标，便于区分
+        is_font = node["is_font"] or node.get("is_font_face")
+        item.setIcon(0, FIF.FONT.icon() if is_font else FIF.FOLDER.icon())
         item.setData(0, Qt.ItemDataRole.UserRole, node["path"])
         item.setData(0, Qt.ItemDataRole.UserRole + 1, node.get("family") or "")
         item.setData(0, Qt.ItemDataRole.UserRole + 3, bool(node.get("installed")))

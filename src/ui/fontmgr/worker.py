@@ -1,28 +1,47 @@
 """后台线程：扫描文件夹为字体树、批量安装/卸载用户字体，避免阻塞界面。"""
 
+import os
+
 from PySide6.QtCore import QThread, Signal
 
-from core import font_register, userfont
+from core import font_io, font_register, userfont
 
 
 class ScanWorker(QThread):
     finished_ok = Signal(object, object)   # tree（根节点列表）, errors
 
-    def __init__(self, roots: list[str], parent=None):
+    def __init__(self, roots: list[str], parent=None, hard: bool = False):
         super().__init__(parent)
         self._roots = roots
+        self._hard = hard
 
     def run(self):
-        font_register.load_cache()  # 复用上次扫描的 mtime/size 缓存，未变化的字体不重读
-        userfont.refresh_user_font_cache()  # 重建「已安装到当前用户」家族缓存
-        errors: list[tuple[str, str]] = []
-        tree: list[dict] = []
-        for root in self._roots:
-            node = font_register.scan_folder_tree(root, errors)
-            if node is not None:
-                tree.append(node)
-        font_register.save_cache()
-        self.finished_ok.emit(tree, errors)
+        # 硬重扫（hard=True）：跳过 mtime/size 缓存，已存在的文件也强制重读名称表并回写缓存
+        font_register.set_hard_rescan(self._hard)
+        try:
+            font_register.load_cache()  # 载入旧缓存；硬扫描时读取绕过，重读后回写刷新
+            userfont.refresh_user_font_cache()  # 重建「已安装到当前用户」家族缓存
+            errors: list[tuple[str, str]] = []
+            tree: list[dict] = []
+            for root in self._roots:
+                # 目录整棵递归扫描；单字体文件只重读该文件（「重新扫描」选中项的部分重扫）
+                if os.path.isdir(root):
+                    node = font_register.scan_folder_tree(root, errors)
+                elif font_io.is_supported(root):
+                    try:
+                        node = font_register.font_node(root)
+                    except Exception as exc:
+                        errors.append((root, str(exc)))
+                        node = None
+                else:
+                    errors.append((root, "路径不存在或不是字体文件"))
+                    node = None
+                if node is not None:
+                    tree.append(node)
+            self.finished_ok.emit(tree, errors)
+        finally:
+            font_register.set_hard_rescan(False)  # 复位，避免影响后续普通扫描
+            font_register.save_cache()
 
 
 class RegisterWorker(QThread):
