@@ -1,0 +1,376 @@
+"""MPV 联动：生成并写入 sub-ass-fonts.lua 到 mpv scripts 目录。
+
+Lua 脚本在 MPV 加载视频时：
+1. 从 track-list 取 ASS 字幕 URL → curl 拉取内容 → 解析用到的字体名；
+2. 读 fontmgr_cache.json（名称→路径反查索引）；
+3. 把匹配到的字体文件硬链接到 LINK_DIR；
+4. 设 sub-fonts-dir = LINK_DIR（mpv 重建 libass，字幕重渲染用上新字体）。
+
+写入脚本时把当前运行模式的 fontmgr_cache.json 真实路径与硬链接目录注入模板。
+"""
+
+from __future__ import annotations
+
+import os
+
+from core.paths import DATA_DIR
+
+_CACHE_PATH = DATA_DIR / "fontmgr_cache.json"
+
+# 占位符：@CACHE_PATH@（字体缓存 JSON 路径）、@LINK_DIR@（硬链接目录）
+_LUA_TEMPLATE = r'''--[[
+    拾字 FontTuner 联动脚本：为当前 ASS 字幕自动挂载所需字体。
+    由 FontTuner「设置 → MPV 插件 → 写入脚本」生成，请勿手工修改。
+    字体缓存: @CACHE_PATH@
+    硬链接目录: @LINK_DIR@
+]]
+
+local utils = require 'mp.utils'
+local msg = require 'mp.msg'
+if msg.trace == nil then
+    msg.trace = function(...) return mp.log("trace", ...) end
+end
+
+local CACHE_PATH = "@CACHE_PATH@"
+local LINK_DIR = "@LINK_DIR@"
+-- cmd 的 copy/del 只认反斜杠路径，转一份反斜杠副本供命令行用
+local LINK_BS = LINK_DIR:gsub("/", "\\")
+
+-- 日志写到脚本同目录 sub-ass-fonts.log
+local _src = debug.getinfo(1, "S").source or ""
+local _script_dir = _src:sub(2):match("^(.*)[/\\][^/\\]+$") or "."
+local _log = io.open(_script_dir .. "/sub-ass-fonts.log", "a")
+
+local function log(level, text)
+    msg[level](text)
+    if _log then
+        _log:write(string.format("%s [%s] %s\n",
+            os.date("%Y-%m-%d %H:%M:%S"), level, text))
+        _log:flush()
+    end
+end
+
+local SUB_EXTS = { ["ass"] = true, ["ssa"] = true }
+local _processed = false
+local _observer = nil
+
+-- ---------- 工具 ----------
+
+-- 设置文件级选项：尊重命令行显式配置（不与之对抗）
+local function set_opt(name, value)
+    local from_cmd = mp.get_property_bool(string.format(
+        "option-info/%s/set-from-commandline", name))
+    if from_cmd then
+        log("debug", "选项 " .. name .. " 已在命令行显式设置，跳过")
+        return
+    end
+    mp.set_property(string.format("file-local-options/%s", name), value)
+    log("trace", "已设 " .. name .. " = " .. tostring(value))
+end
+
+-- curl 拉取 URL 内容（Windows 10 1803+ 自带 curl）
+local function fetch_url(url)
+    local res = utils.subprocess({
+        args = { "curl", "-s", "--connect-timeout", "10", "--max-time", "20", url },
+        capture_stdout = true,
+    })
+    if res and res.status == 0 and res.stdout then
+        return res.stdout
+    end
+    if res then
+        log("warn", "curl 失败 status=" .. tostring(res.status))
+    end
+    return nil
+end
+
+-- 读取字幕内容（URL 走 curl，本地路径走 io）
+local function get_sub_content(path)
+    if path:match("^https?://") then
+        return fetch_url(path)
+    end
+    local f = io.open(path, "rb")
+    if not f then
+        return nil
+    end
+    local c = f:read("*a")
+    f:close()
+    return c
+end
+
+-- 清空硬链接目录（启动时先清，避免残留）
+-- 注意：cmd del 的通配符只认反斜杠路径（正斜杠会失败），用 LINK_BS 转反斜杠再删
+local function clear_link_dir()
+    utils.subprocess({
+        args = { "cmd", "/c", "del", "/q", LINK_BS .. "\\*" },
+        capture_stdout = true,
+    })
+    log("trace", "已清空链接目录")
+end
+
+-- 挂载字体到链接目录：优先硬链接（同卷 NTFS），失败回退复制
+-- （SMB/网络卷如 Synology NAS 不支持客户端建硬链接，须复制）
+local function mount_font(src, dst)
+    local res = utils.subprocess({
+        args = { "cmd", "/c", "mklink", "/H", dst, src },
+        capture_stdout = true,
+    })
+    if res and res.status == 0 then
+        return "硬链接"
+    end
+    local c = utils.subprocess({
+        args = { "cmd", "/c", "copy", "/y", src, dst },
+        capture_stdout = true,
+    })
+    if c and c.status == 0 then
+        return "复制"
+    end
+    return nil
+end
+
+-- ---------- ASS 字体解析 ----------
+
+local function parse_ass_fonts(content)
+    local fonts = {}
+    local in_styles = false
+    local style_col = nil
+    local fields = nil
+    for line in content:gmatch("[^\r\n]+") do
+        line = line:gsub("^%s+", "")
+        if line:sub(1, 1) == "[" then
+            in_styles = line:lower():find("styles", 1, true) ~= nil
+            fields, style_col = nil, nil
+        elseif in_styles then
+            local low = line:lower()
+            if low:find("^format:") then
+                fields = {}
+                for f in line:sub(8):gmatch("[^,]+") do
+                    fields[#fields + 1] = f:gsub("^%s+", ""):gsub("%s+$", "")
+                end
+                for i, name in ipairs(fields) do
+                    if name:lower() == "fontname" then
+                        style_col = i
+                    end
+                end
+            elseif low:find("^style:") and style_col and fields then
+                local parts = {}
+                for p in line:sub(7):gmatch("([^,]+)") do
+                    parts[#parts + 1] = p
+                end
+                local name = parts[style_col]
+                if name then
+                    name = name:gsub("^%s+", ""):gsub("%s+$", "")
+                    if name ~= "" then
+                        fonts[name] = true
+                    end
+                end
+            end
+        end
+        if line:find("\\fn", 1, true) then
+            for tag in line:gmatch("\\fn([^\\}]+)") do
+                local nm = tag:gsub("^%s+", ""):gsub("%s+$", "")
+                if nm ~= "" then
+                    fonts[nm] = true
+                end
+            end
+        end
+    end
+    local out = {}
+    for name in pairs(fonts) do
+        out[#out + 1] = name
+    end
+    table.sort(out)
+    return out
+end
+
+-- ---------- 缓存反查索引 ----------
+
+-- 名称(小写) -> 路径列表
+local function build_index()
+    local f = io.open(CACHE_PATH, "rb")
+    if not f then
+        log("warn", "无法读取字体缓存: " .. CACHE_PATH)
+        return nil
+    end
+    local data = utils.parse_json(f:read("*a"))
+    f:close()
+    if type(data) ~= "table" then
+        log("warn", "字体缓存解析失败: " .. CACHE_PATH)
+        return nil
+    end
+    local index = {}
+    local add = function(name, path)
+        if type(name) == "string" and name ~= "" then
+            local key = name:lower()
+            if not index[key] then
+                index[key] = {}
+            end
+            index[key][#index[key] + 1] = path
+        end
+    end
+    local link_low = LINK_BS:lower()
+    for path, entry in pairs(data) do
+        if type(entry) == "table" then
+            -- 跳过暂存目录（LINK_DIR）里被缓存到的副本，避免源路径指向刚清空的副本
+            if path:lower():sub(1, #link_low) ~= link_low then
+                add(entry.win_name, path)
+                add(entry.en_name, path)
+                add(entry.family, path)
+                for _, face in ipairs(entry.faces or {}) do
+                    add(face.win_name, path)
+                    add(face.en_name, path)
+                    add(face.family, path)
+                end
+            end
+        end
+    end
+    local count = 0
+    for _ in pairs(index) do
+        count = count + 1
+    end
+    log("trace", string.format("缓存索引 %d 个名称", count))
+    return index
+end
+
+-- 匹配字体名 -> 路径列表（精确优先，前缀回退覆盖「家族名+字重」写法）
+local function match_font(name, index)
+    local key = name:lower()
+    if index[key] then
+        return index[key]
+    end
+    local best = {}
+    for fam, paths in pairs(index) do
+        if #fam < #key and key:sub(1, #fam) == fam then
+            for _, p in ipairs(paths) do
+                best[#best + 1] = p
+            end
+        end
+    end
+    return #best > 0 and best or nil
+end
+
+-- ---------- 主流程 ----------
+
+local function find_selected_sub()
+    local tracks = mp.get_property_native("track-list")
+    if type(tracks) ~= "table" then
+        return nil
+    end
+    for _, t in ipairs(tracks) do
+        if t.type == "sub" and t.selected then
+            return t["external-filename"] or t["filename"] or t.external_filename or nil
+        end
+    end
+    return mp.get_property("current-tracks/sub/external-filename")
+end
+
+local function process()
+    if _processed then
+        return
+    end
+    _processed = true
+
+    local sub_path = find_selected_sub()
+    if not sub_path then
+        log("info", "未找到选中的字幕轨")
+        return
+    end
+
+    local path_clean = sub_path:gsub("%?.*$", "")
+    local ext = path_clean:lower():match("%.([a-z0-9]+)$")
+    if not SUB_EXTS[ext] then
+        log("info", "非 ASS/SSA（" .. tostring(ext) .. "），跳过字体挂载")
+        return
+    end
+
+    local content = get_sub_content(sub_path)
+    if not content then
+        log("warn", "无法获取字幕内容")
+        return
+    end
+
+    local fonts = parse_ass_fonts(content)
+    if #fonts == 0 then
+        log("info", "字幕未解析到字体名")
+        return
+    end
+    log("info", "用到的字体: " .. table.concat(fonts, ", "))
+
+    local index = build_index()
+    if not index then
+        return
+    end
+
+    clear_link_dir()
+    local linked = 0
+    for _, font in ipairs(fonts) do
+        local paths = match_font(font, index)
+        if not paths then
+            log("warn", "字体库未找到: " .. font)
+        else
+            local mounted = false
+            for _, src in ipairs(paths) do
+                local base = src:match("[^/\\]+$") or "font.ttf"
+                local dst = LINK_BS .. "\\" .. base
+                local method = mount_font(src, dst)
+                if method then
+                    linked = linked + 1
+                    log("info", "已挂载(" .. method .. ") " .. font .. " <- " .. src)
+                    mounted = true
+                    break
+                end
+            end
+            if not mounted then
+                log("warn", "挂载失败 " .. font)
+            end
+        end
+    end
+
+    -- 严格使用 ASS 自身样式（否则 mpv 默认 sub-ass-override=yes 会覆盖样式，改用其他字体）
+    set_opt("sub-ass-override", "no")
+    set_opt("sub-fonts-dir", LINK_DIR)
+    log("info", "已设 sub-fonts-dir = " .. LINK_DIR .. "（挂载 " .. linked .. " 个字体）")
+end
+
+local function on_tracks_changed()
+    if find_selected_sub() then
+        process()
+        if _observer then
+            mp.unobserve_property(_observer)
+            _observer = nil
+        end
+    end
+end
+
+mp.add_hook("on_load", 50, function()
+    _processed = false
+    if _observer then
+        mp.unobserve_property(_observer)
+        _observer = nil
+    end
+    _observer = mp.observe_property("track-list", "native", on_tracks_changed)
+    on_tracks_changed()
+end)
+'''
+
+
+def write_script(scripts_dir: str, link_dir: str) -> tuple[bool, str]:
+    """把联动 Lua 脚本写入 scripts_dir/sub-ass-fonts.lua。
+
+    返回 (ok, 消息)。失败消息为原因，成功消息为写入的完整路径。
+    """
+    if not scripts_dir or not os.path.isdir(scripts_dir):
+        return False, "MPV 脚本目录无效"
+    if not link_dir:
+        return False, "请先设置硬链接目录"
+    script = (
+        _LUA_TEMPLATE
+        .replace("@CACHE_PATH@", str(_CACHE_PATH).replace("\\", "/"))
+        .replace("@LINK_DIR@", link_dir.replace("\\", "/"))
+    )
+    path = os.path.join(scripts_dir, "sub-ass-fonts.lua")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(script)
+    except OSError as exc:
+        return False, str(exc)
+    return True, path

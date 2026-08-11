@@ -59,6 +59,10 @@ class Option(QConfig):
     # 字体预览的字号（点），由预览面板 spinbox 调节
     preview_font_size = ConfigItem("OPTION", "PREVIEW_FONT_SIZE", 24, RangeValidator(8, 72))
 
+    # MPV 联动：字体硬链接目录（与字体库同盘），及 mpv/Jellyfin 的 scripts 目录
+    mpv_link_dir = ConfigItem("OPTION", "MPV_LINK_DIR", "", FolderValidator())
+    mpv_scripts_dir = ConfigItem("OPTION", "MPV_SCRIPTS_DIR", "", FolderValidator())
+
 
 option = Option()
 qconfig.load(str(CONFIG_PATH), option)

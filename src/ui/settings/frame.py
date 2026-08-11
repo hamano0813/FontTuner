@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QTextOption
-from PySide6.QtWidgets import QFrame, QGridLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QFrame, QGridLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel,
     ExpandGroupSettingCard,
@@ -11,6 +11,8 @@ from qfluentwidgets import (
     InfoBarPosition,
     OptionsSettingCard,
     PlainTextEdit,
+    PrimaryPushButton,
+    PushButton,
     ScrollArea,
     SettingCard,
     SpinBox,
@@ -21,7 +23,7 @@ from qfluentwidgets import (
 )
 
 from config import option
-from core import autostart
+from core import autostart, mpv_plugin
 from ui.settings.update_card import UpdateCard
 
 
@@ -70,6 +72,69 @@ class PreviewTextCard(ExpandGroupSettingCard):
         qconfig.set(option.preview_font_size, value)
 
 
+class MpvPluginCard(ExpandGroupSettingCard):
+    """MPV 插件设置卡：硬链接目录 + MPV 脚本目录 + 写入脚本。"""
+
+    def __init__(self, parent=None):
+        super().__init__(
+            FIF.VIDEO, "MPV 插件",
+            "联动 MPV：自动为当前字幕挂载所需字体（写入 Lua 脚本 + 硬链接目录）",
+            parent,
+        )
+        self.viewLayout.setContentsMargins(0, 0, 0, 0)
+        self.viewLayout.setSpacing(0)
+
+        self.link_btn = PushButton("选择文件夹", self)
+        self.link_btn.setFixedWidth(135)
+        self.link_btn.clicked.connect(self._pick_link_dir)
+        self.link_group = self.addGroup(
+            FIF.FOLDER, "设置硬链接目录",
+            self._content(option.mpv_link_dir.value), self.link_btn)
+
+        self.scripts_btn = PushButton("选择文件夹", self)
+        self.scripts_btn.setFixedWidth(135)
+        self.scripts_btn.clicked.connect(self._pick_scripts_dir)
+        self.scripts_group = self.addGroup(
+            FIF.CODE, "设置 MPV 脚本目录",
+            self._content(option.mpv_scripts_dir.value), self.scripts_btn)
+
+        self.write_btn = PrimaryPushButton("写入脚本", self)
+        self.write_btn.setFixedWidth(135)
+        self.write_btn.clicked.connect(self._on_write_script)
+        self.addGroup(
+            FIF.SAVE, "写入脚本",
+            "生成联动 Lua 脚本到 MPV 脚本目录（自动嵌入当前字体缓存路径）",
+            self.write_btn)
+
+    @staticmethod
+    def _content(path: str) -> str:
+        return path or "未设置"
+
+    def _pick_link_dir(self):
+        dir_ = QFileDialog.getExistingDirectory(
+            self.window(), "选择硬链接目录", option.mpv_link_dir.value or "")
+        if dir_:
+            qconfig.set(option.mpv_link_dir, dir_)
+            self.link_group.setContent(dir_)
+
+    def _pick_scripts_dir(self):
+        dir_ = QFileDialog.getExistingDirectory(
+            self.window(), "选择 MPV 脚本目录", option.mpv_scripts_dir.value or "")
+        if dir_:
+            qconfig.set(option.mpv_scripts_dir, dir_)
+            self.scripts_group.setContent(dir_)
+
+    def _on_write_script(self):
+        ok, msg_ = mpv_plugin.write_script(
+            option.mpv_scripts_dir.value, option.mpv_link_dir.value)
+        if ok:
+            InfoBar.success("已写入脚本", msg_, parent=self.window(),
+                            position=InfoBarPosition.TOP, duration=4000)
+        else:
+            InfoBar.error("写入脚本失败", msg_, parent=self.window(),
+                          position=InfoBarPosition.TOP, duration=5000)
+
+
 class SettingsFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -101,6 +166,9 @@ class SettingsFrame(QFrame):
         # ===== 预览文字 =====
         self.preview_text_card = PreviewTextCard(self)
 
+        # ===== MPV 插件 =====
+        self.mpv_plugin_card = MpvPluginCard(self)
+
         # ===== 关于 =====
         self.about_card = SettingCard(
             FIF.INFO, "拾字 FontTuner",
@@ -118,6 +186,7 @@ class SettingsFrame(QFrame):
         sub_layout.addWidget(self.auto_restore_card)
         sub_layout.addWidget(self.theme_card)
         sub_layout.addWidget(self.preview_text_card)
+        sub_layout.addWidget(self.mpv_plugin_card)
         sub_layout.addWidget(self.about_card)
         sub_layout.addWidget(self.update_card)
         sub_layout.addStretch()
