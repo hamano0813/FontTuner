@@ -114,8 +114,8 @@ def is_font_installed(path: str) -> bool:
 
 # ---------------------------------------------------------------- 扫描
 
-# 语言键优先级：简 > 繁 > 日 > 英（「Windows 标准字体名」列默认取用顺序）
-_LANG_PRIORITY = ("sc", "tc", "jp", "en")
+# 语言键优先级：简 > 英 > 日 > 繁（「Windows 标准字体名」列默认取用顺序）
+_LANG_PRIORITY = ("sc", "en", "jp", "tc")
 
 
 def _win_lang_key(lang_id: int) -> str | None:
@@ -157,9 +157,9 @@ def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str
 
     family    — 原逻辑第一匹配（nameID 16→1 × 平台 3→0→1），供注册表/用户字体匹配；
     subfamily — 同逻辑取子家族名（nameID 17→2），供 TTC face 展示；
-    win_name  — 按 简→繁→日→英 优先级挑出的展示名（Windows 标准字体名列），
-                同语言内 家族名(nameID 1) 优先于 首选家族名(nameID 16)，
-                均不存在时回退到文件里第一个家族名；
+    win_name  — Windows 标准字体名列展示名：按 简→英→日→繁 优先级取同语言
+                首选家族名(nameID 16) + 首选子家族名(nameID 17，缺则回退子家族名 2) 拼接；
+                该语言缺家族名则跳过，全缺回退 family + subfamily；
     en_name   — 英文家族名（语言 en，nameID 16→1），作下拉框隐藏匹配词，无则回退 family。
     TTC 取第 face_index 个子字体（默认 0）；失败返回 ("", "", "", "")。
     """
@@ -243,45 +243,39 @@ def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str
     family = _first_match(16, 1)
     subfamily = _first_match(17, 2)
 
-    # 按语言收集：best_1=家族名(nameID1)，best_16=首选家族名(nameID16)。
-    # 同语言多平台记录时优先 Windows(3)，其次 Mac(1)/Unicode(0) 兜底，
+    # 按语言收集：best_1=家族名(1)，best_2=子家族名(2)，best_16=首选家族名(16)，
+    # best_17=首选子家族名(17)。同语言多平台记录时优先 Windows(3)，其次 Mac(1)/Unicode(0) 兜底，
     # 避免 Mac 记录（尤其 CJK 编码差异）覆盖 Windows 的干净文本。
     _plat_priority = {3: 0, 1: 1, 0: 2}
-    _best_1: dict[str, tuple[int, str]] = {}
-    _best_16: dict[str, tuple[int, str]] = {}
+    _buckets: dict[int, dict[str, tuple[int, str]]] = {1: {}, 2: {}, 16: {}, 17: {}}
     for platform, lang_id, nid in ordered:
-        if nid not in (1, 16):
+        if nid not in _buckets:
             continue
         lk = _win_lang_key(lang_id) if platform == 3 else (
             _mac_lang_key(lang_id) if platform == 1 else None)
         if lk is None:
             continue
-        bucket = _best_1 if nid == 1 else _best_16
+        bucket = _buckets[nid]
         cur = bucket.get(lk)
         if cur is None or _plat_priority[platform] < cur[0]:
             bucket[lk] = (_plat_priority[platform], texts[(platform, lang_id, nid)])
-    best_1 = {k: v[1] for k, v in _best_1.items()}
-    best_16 = {k: v[1] for k, v in _best_16.items()}
+    best_1 = {k: v[1] for k, v in _buckets[1].items()}
+    best_2 = {k: v[1] for k, v in _buckets[2].items()}
+    best_16 = {k: v[1] for k, v in _buckets[16].items()}
+    best_17 = {k: v[1] for k, v in _buckets[17].items()}
 
-    # win_name：简→繁→日→英，同语言内 家族名(1) 优先于 首选家族名(16)
+    # win_name：简→英→日→繁，同语言内「首选家族名(16) 首选子家族名(17)」拼接显示，
+    # 子家族名缺该语言记录时回退子家族名(2)；该语言缺家族名则整语言跳过（避免单显子家族名）
     win_name = ""
     for lk in _LANG_PRIORITY:
-        if lk in best_1:
-            win_name = best_1[lk]
-            break
-        if lk in best_16:
-            win_name = best_16[lk]
-            break
-    if not win_name:  # 回退：文件里第一个家族名（nid 1 优先，其次 16）
-        for platform, lang_id, nid in ordered:
-            if nid == 1:
-                win_name = texts[(platform, lang_id, nid)]
-                break
-        if not win_name:
-            for platform, lang_id, nid in ordered:
-                if nid == 16:
-                    win_name = texts[(platform, lang_id, nid)]
-                    break
+        fam = best_16.get(lk)
+        if not fam:
+            continue
+        sub = best_17.get(lk) or best_2.get(lk)
+        win_name = f"{fam} {sub}" if sub else fam
+        break
+    if not win_name:  # 回退：文件里第一个家族名 + 子家族名
+        win_name = " ".join(x for x in (family, subfamily) if x)
 
     # en_name：英文家族名（语言 en，nameID 16→1），作下拉框隐藏匹配词；无则回退 family
     en_name = best_16.get("en") or best_1.get("en") or ""
@@ -293,8 +287,8 @@ def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str
 # ---------------------------------------------------------------- 缓存（mtime/size 增量）
 
 _CACHE_PATH = DATA_DIR / "fontmgr_cache.json"
-# 缓存结构版本：win_name 语义（家族名优先）与 faces 结构变更时 +1，使旧缓存自动失效重读
-_CACHE_VERSION = 2
+# 缓存结构版本：win_name 语义（首选家族名+首选子家族名拼接、语言优先级 简英日繁）变更时 +1，使旧缓存自动失效重读
+_CACHE_VERSION = 3
 _cache: dict = {}
 # 硬重扫标志：重新扫描按钮置位，使名称读取跳过 mtime/size 缓存，
 # 对已存在的文件也强制重读名称表，并回写刷新缓存条目

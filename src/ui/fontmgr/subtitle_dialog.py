@@ -181,6 +181,13 @@ class SearchableComboBox(QComboBox):
         if index >= 0:
             self._highlighted_row = index
 
+    def wheelEvent(self, event) -> None:
+        """禁止滚轮操作：既不切换选项，也不让事件冒泡到上层滚动列表。
+
+        可编辑 combo 悬停滚轮容易误触，直接吞掉事件（下拉列表弹出后由视图自身滚动）。
+        """
+        event.accept()
+
     def eventFilter(self, obj, event) -> bool:
         """下拉弹出（焦点在 QListView）时将编辑键路由回行编辑，回车取高亮行确认。"""
         if (obj is self.view() and isinstance(event, QKeyEvent)

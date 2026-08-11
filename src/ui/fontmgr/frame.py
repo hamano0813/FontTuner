@@ -499,13 +499,18 @@ class FontManagerFrame(QFrame):
             if child.childCount() > 0:
                 self._collect_item_font_names(child, seen)
             else:
-                win = child.data(0, Qt.ItemDataRole.UserRole + 4) \
-                    or child.data(0, Qt.ItemDataRole.UserRole + 1) or ""
+                en = child.data(0, Qt.ItemDataRole.UserRole + 5) or ""
+                family = child.data(0, Qt.ItemDataRole.UserRole + 1) or ""
+                win = child.data(0, Qt.ItemDataRole.UserRole + 4) or family
                 if win:
-                    seen.setdefault(win, child.data(0, Qt.ItemDataRole.UserRole + 5) or "")
+                    seen.setdefault(win, en)
+                # 家族名别名：win_name 已带子家族名（如「微软雅黑 Regular」），
+                # 而字幕常只写家族名（如「微软雅黑」），补一项使完全匹配仍可自动预选
+                if family and family != win:
+                    seen.setdefault(family, en)
 
     def _check_font_nodes_by_name(self, names: set[str]) -> None:
-        """按标准字体名（win_name）自动勾选对应字体文件节点。
+        """按标准字体名（win_name）或家族名自动勾选对应字体文件节点。
 
         独立 .ttf/.otf 节点命中则直接勾选；TTC/OTC 内的 face 子节点命中则勾选其
         TTC 母节点（注册整个集合文件）。批量勾选后统一走 _sync_registration 注册。
@@ -521,14 +526,15 @@ class FontManagerFrame(QFrame):
         self._sync_registration()
 
     def _check_node_by_name(self, item, names: set[str]) -> None:
-        """递归勾选：字体文件（含 TTC 整体）按自身 win_name 匹配；face 子节点按其 win_name 勾选母节点。"""
-        win = item.data(0, Qt.ItemDataRole.UserRole + 4) \
-            or item.data(0, Qt.ItemDataRole.UserRole + 1) or ""
+        """递归勾选：字体文件（含 TTC 整体）按自身 win_name/家族名匹配；face 子节点命中则勾选母节点。"""
+        family = item.data(0, Qt.ItemDataRole.UserRole + 1) or ""
+        win = item.data(0, Qt.ItemDataRole.UserRole + 4) or family
+        hit = win in names or (bool(family) and family in names)
         if item.data(0, Qt.ItemDataRole.UserRole + 6):
             # 独立字体 / TTC 整体：命中即勾选（仅可勾选节点）
-            if win in names and item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+            if hit and item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                 item.setCheckState(0, Qt.CheckState.Checked)
-        elif item.parent() is not None and win in names:
+        elif item.parent() is not None and hit:
             # face 子节点：命中即勾选其母节点（TTC/OTC 整体）
             parent = item.parent()
             if (parent.data(0, Qt.ItemDataRole.UserRole + 6)
@@ -749,7 +755,7 @@ class FontManagerFrame(QFrame):
     # ---------------------------------------------------------------- 安装到当前用户
 
     def _on_tree_context_menu(self, pos):
-        """树右键：按选中集合（目录自动展开到字体叶）提供安装/取消安装到当前用户。"""
+        """树右键：按选中集合（目录自动展开到字体叶）提供「发送到字体编辑」/安装/取消安装。"""
         item = self.tree.itemAt(pos)
         if item is None:
             return
@@ -790,20 +796,61 @@ class FontManagerFrame(QFrame):
         for it in items:
             walk(it)
 
-        if not to_install and not to_uninstall:
+        # 收集可发送到编辑器页的字体文件路径（目录展开到字体；TTC/OTC face 归到集合文件）
+        to_send: set[str] = set()
+
+        def collect_send(it):
+            if it.childCount() > 0 and not it.data(0, Qt.ItemDataRole.UserRole + 6):
+                for i in range(it.childCount()):
+                    collect_send(it.child(i))
+                return
+            path = it.data(0, Qt.ItemDataRole.UserRole)
+            if not path and it.parent() is not None:
+                path = it.parent().data(0, Qt.ItemDataRole.UserRole)
+            if path:
+                to_send.add(path)
+
+        for it in items:
+            collect_send(it)
+        sendable = sorted(to_send)
+
+        if not sendable and not to_install and not to_uninstall:
             return
         menu = RoundMenu(parent=self.tree)
+        if sendable:
+            n = len(sendable)
+            act = Action(FIF.EDIT, "发送到字体编辑" if n == 1 else f"发送到字体编辑（{n} 个）", menu)
+            act.triggered.connect(lambda: self._send_to_editor(list(sendable)))
+            menu.addAction(act)
         if to_install:
+            if sendable:
+                menu.addSeparator()
             n = len(to_install)
             act = Action(FIF.ADD, "安装到当前用户" if n == 1 else f"安装到当前用户（{n} 个）", menu)
             act.triggered.connect(lambda: self._on_install_to_user(list(to_install)))
             menu.addAction(act)
         if to_uninstall:
+            if sendable or to_install:
+                menu.addSeparator()
             n = len(to_uninstall)
             act = Action(FIF.DELETE, "取消安装" if n == 1 else f"取消安装（{n} 个）", menu)
             act.triggered.connect(lambda: self._on_uninstall_from_user(list(to_uninstall)))
             menu.addAction(act)
         menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _send_to_editor(self, paths: list[str]):
+        """发送到字体编辑：追加到编辑器待编辑表格，InfoBar 提示成功（不跳转页面）。"""
+        if not paths:
+            return
+        editor = getattr(self.window(), "editor_frame", None)
+        if editor is None:
+            return
+        editor.import_paths(paths, append=True)
+        n = len(paths)
+        InfoBar.success(
+            "已发送到字体编辑",
+            f"{n} 个字体已追加到编辑表格。" if n > 1 else "已追加 1 个字体到编辑表格。",
+            parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
 
     def _on_install_to_user(self, entries):
         """批量安装到当前用户（单个直接执行；批量先确认）。"""
