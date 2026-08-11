@@ -148,6 +148,10 @@ class FontManagerFrame(QFrame):
         self.subtitle_button.setToolTip("选择 .ass/.ssa 字幕，把其中用到的字体名批量替换为当前字体库中的字体")
         self.subtitle_button.clicked.connect(self._on_subtitle_adapt)
         filter_row.addWidget(self.subtitle_button)
+        self.subtitle_dir_button = PushButton(FIF.FOLDER, "字幕文件夹", self)
+        self.subtitle_dir_button.setToolTip("递归读取所选目录下所有 .ass/.ssa 字幕，批量替换字体名")
+        self.subtitle_dir_button.clicked.connect(self._on_subtitle_adapt_dir)
+        filter_row.addWidget(self.subtitle_dir_button)
         self.save_sel_button = PushButton(FIF.SAVE, "保存选中", self)
         self.save_sel_button.setToolTip("把当前勾选的字体保存下来，供以后恢复")
         self.save_sel_button.clicked.connect(self._on_save_selection)
@@ -549,13 +553,34 @@ class FontManagerFrame(QFrame):
             self._check_node_by_name(item.child(i), names)
 
     def _on_subtitle_adapt(self):
-        """字幕字体适配：选 .ass/.ssa，把用到的字体名批量替换为当前字体库中的字体。"""
+        """字幕字体适配：选 .ass/.ssa 文件，把用到的字体名批量替换为当前字体库中的字体。"""
         paths, _ = QFileDialog.getOpenFileNames(
             self.window(), "选择字幕文件（可多选）", "",
             "字幕文件 (*.ass *.ssa);;所有文件 (*.*)")
         if not paths:
             return
+        self._run_subtitle_adapt(paths)
 
+    def _on_subtitle_adapt_dir(self):
+        """字幕字体适配（目录）：递归读取目录下所有 .ass/.ssa 文件。"""
+        dir_ = QFileDialog.getExistingDirectory(
+            self.window(), "选择字幕所在文件夹（递归读取 .ass/.ssa）",
+            option.import_dir.value or "")
+        if not dir_:
+            return
+        paths: list[str] = []
+        for root, _, files in os.walk(dir_):
+            for fn in files:
+                if fn.lower().endswith((".ass", ".ssa")):
+                    paths.append(os.path.join(root, fn))
+        if not paths:
+            InfoBar.warning("未找到字幕", f"所选目录下没有 .ass/.ssa 文件：\n{dir_}",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+            return
+        self._run_subtitle_adapt(paths)
+
+    def _run_subtitle_adapt(self, paths: list[str]):
+        """字幕字体适配核心：收集字体名 → 弹窗选替换 → 批量写回。"""
         # 收集字幕字体名（跨文件去重）
         ass_fonts: set[str] = set()
         for p in paths:

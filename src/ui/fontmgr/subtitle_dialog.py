@@ -10,6 +10,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QAbstractScrollArea,
     QApplication,
     QComboBox,
     QHeaderView,
@@ -185,10 +186,15 @@ class SearchableComboBox(QComboBox):
             self._highlighted_row = index
 
     def wheelEvent(self, event) -> None:
-        """禁止滚轮操作：既不切换选项，也不让事件冒泡到上层滚动列表。
-
-        可编辑 combo 悬停滚轮容易误触，直接吞掉事件（下拉列表弹出后由视图自身滚动）。
-        """
+        """滚轮不切换选项（防误触），转交所在表格滚动整个表格。"""
+        scroll = self.parentWidget()
+        while scroll is not None:
+            if isinstance(scroll, QAbstractScrollArea):
+                bar = scroll.verticalScrollBar()
+                if bar is not None and bar.maximum() > 0:
+                    bar.setValue(bar.value() - event.angleDelta().y())
+                break
+            scroll = scroll.parentWidget()
         event.accept()
 
     def eventFilter(self, obj, event) -> bool:
@@ -303,7 +309,7 @@ class SubtitleFontDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.title_label)
         self.viewLayout.addWidget(self.hint)
         self.viewLayout.addWidget(self.table)
-        self.widget.setMinimumSize(760, 480)
+        self.widget.setMinimumSize(760, 680)
         self.yesButton.setText("替换")
         self.cancelButton.setText("取消")
 
