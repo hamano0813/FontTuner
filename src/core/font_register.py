@@ -158,7 +158,8 @@ def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str
     family    — 原逻辑第一匹配（nameID 16→1 × 平台 3→0→1），供注册表/用户字体匹配；
     subfamily — 同逻辑取子家族名（nameID 17→2），供 TTC face 展示；
     win_name  — Windows 标准字体名列展示名：按 简→英→日→繁 优先级取同语言
-                首选家族名(nameID 16)；该语言缺家族名则下探下一语言，全缺回退 family；
+                家族名(nameID 1)，同语言缺则回退首选家族名(nameID 16)；
+                全缺回退 family；
     en_name   — 英文家族名（语言 en，nameID 16→1），作下拉框隐藏匹配词，无则回退 family。
     TTC 取第 face_index 个子字体（默认 0）；失败返回 ("", "", "", "")。
     """
@@ -261,12 +262,14 @@ def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str
     best_1 = {k: v[1] for k, v in _buckets[1].items()}
     best_16 = {k: v[1] for k, v in _buckets[16].items()}
 
-    # win_name：简→英→日→繁，取同语言首选家族名(nameID 16)，不拼接子家族名
+    # win_name：简→英→日→繁，取同语言家族名(nameID 1)，缺则回退首选家族名(nameID 16)
     win_name = ""
     for lk in _LANG_PRIORITY:
-        fam = best_16.get(lk)
-        if fam:
-            win_name = fam
+        if lk in best_1:
+            win_name = best_1[lk]
+            break
+        if lk in best_16:
+            win_name = best_16[lk]
             break
     if not win_name:  # 回退：文件里第一个家族名
         win_name = family
@@ -281,8 +284,8 @@ def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str
 # ---------------------------------------------------------------- 缓存（mtime/size 增量）
 
 _CACHE_PATH = DATA_DIR / "fontmgr_cache.json"
-# 缓存结构版本：win_name 语义（首选家族名、语言优先级 简英日繁）变更时 +1，使旧缓存自动失效重读
-_CACHE_VERSION = 4
+# 缓存结构版本：win_name 语义（家族名优先、语言优先级 简英日繁）变更时 +1，使旧缓存自动失效重读
+_CACHE_VERSION = 5
 _cache: dict = {}
 # 硬重扫标志：重新扫描按钮置位，使名称读取跳过 mtime/size 缓存，
 # 对已存在的文件也强制重读名称表，并回写刷新缓存条目
