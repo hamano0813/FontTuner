@@ -92,18 +92,79 @@ local function fetch_url(url)
     return nil
 end
 
--- 读取字幕内容（URL 走 curl，本地路径走 io）
+-- UTF-16LE/BE → UTF-8（纯算术位运算，兼容 mpv 的 Lua 5.1/LuaJIT）
+-- 中文字幕常以 UTF-16 保存（PopSub 等老工具），字节流里找不到 [V4+ Styles]/\fn
+local function utf16_to_utf8(s, big_endian)
+    local out = {}
+    local i, n = 1, #s
+    local function read16()
+        local lo, hi = s:byte(i), s:byte(i + 1)
+        i = i + 2
+        if big_endian then
+            return lo * 256 + hi
+        end
+        return lo + hi * 256
+    end
+    local function u8(cp)
+        if cp < 0x80 then
+            return string.char(cp)
+        elseif cp < 0x800 then
+            return string.char(0xC0 + math.floor(cp / 0x40),
+                               0x80 + cp % 0x40)
+        elseif cp < 0x10000 then
+            return string.char(0xE0 + math.floor(cp / 0x1000),
+                               0x80 + math.floor(cp / 0x40) % 0x40,
+                               0x80 + cp % 0x40)
+        else
+            return string.char(0xF0 + math.floor(cp / 0x40000),
+                               0x80 + math.floor(cp / 0x1000) % 0x40,
+                               0x80 + math.floor(cp / 0x40) % 0x40,
+                               0x80 + cp % 0x40)
+        end
+    end
+    while i + 1 <= n do
+        local cp = read16()
+        if cp >= 0xD800 and cp <= 0xDBFF and i + 1 <= n then
+            local lo = read16()
+            if lo >= 0xDC00 and lo <= 0xDFFF then
+                cp = 0x10000 + (cp - 0xD800) * 0x400 + (lo - 0xDC00)
+            end
+        end
+        out[#out + 1] = u8(cp)
+    end
+    return table.concat(out)
+end
+
+-- 归一化字幕编码：UTF-16 BOM 转 UTF-8，UTF-8 BOM 剥离
+local function normalize_sub_text(s)
+    local b1, b2 = s:byte(1), s:byte(2)
+    if b1 == 0xFF and b2 == 0xFE then
+        return utf16_to_utf8(s:sub(3), false)
+    elseif b1 == 0xFE and b2 == 0xFF then
+        return utf16_to_utf8(s:sub(3), true)
+    elseif b1 == 0xEF and b2 == 0xBB and s:byte(3) == 0xBF then
+        return s:sub(4)
+    end
+    return s
+end
+
+-- 读取字幕内容（URL 走 curl，本地路径走 io；读回后归一化编码）
 local function get_sub_content(path)
+    local c
     if path:match("^https?://") then
-        return fetch_url(path)
+        c = fetch_url(path)
+    else
+        local f = io.open(path, "rb")
+        if not f then
+            return nil
+        end
+        c = f:read("*a")
+        f:close()
     end
-    local f = io.open(path, "rb")
-    if not f then
-        return nil
+    if c then
+        return normalize_sub_text(c)
     end
-    local c = f:read("*a")
-    f:close()
-    return c
+    return nil
 end
 
 -- 清空硬链接目录（启动时先清，避免残留）
