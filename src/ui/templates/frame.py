@@ -3,6 +3,8 @@
 模板可同时覆盖多个语言：每个语言（简/繁/日/英）各自维护全部 name 字段。
 """
 
+from copy import deepcopy
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
@@ -252,18 +254,28 @@ class TemplateFrame(QFrame):
 
         self.btn_new = PushButton(FIF.ADD, "新建", self)
         self.btn_edit = PushButton(FIF.EDIT, "编辑", self)
+        self.btn_copy = PushButton(FIF.COPY, "复制", self)
         self.btn_delete = PushButton(FIF.DELETE, "删除", self)
+        self.btn_up = PushButton(FIF.UP, "上移", self)
+        self.btn_down = PushButton(FIF.DOWN, "下移", self)
         self.btn_apply = PrimaryPushButton(FIF.BRUSH, "应用到字体编辑页", self)
 
         self.btn_new.clicked.connect(self._on_new)
         self.btn_edit.clicked.connect(lambda: self._on_edit())
+        self.btn_copy.clicked.connect(self._on_copy)
         self.btn_delete.clicked.connect(self._on_delete)
+        self.btn_up.clicked.connect(self._on_move_up)
+        self.btn_down.clicked.connect(self._on_move_down)
         self.btn_apply.clicked.connect(self._on_apply)
 
         btn_bar = QHBoxLayout()
         btn_bar.addWidget(self.btn_new)
         btn_bar.addWidget(self.btn_edit)
+        btn_bar.addWidget(self.btn_copy)
         btn_bar.addWidget(self.btn_delete)
+        btn_bar.addSpacing(8)
+        btn_bar.addWidget(self.btn_up)
+        btn_bar.addWidget(self.btn_down)
         btn_bar.addStretch(1)
         btn_bar.addWidget(self.btn_apply)
 
@@ -285,10 +297,14 @@ class TemplateFrame(QFrame):
             self.list.addItem(item)
 
     def _update_buttons(self) -> None:
-        has = self.list.currentRow() >= 0
+        row = self.list.currentRow()
+        has = row >= 0
         self.btn_edit.setEnabled(has)
+        self.btn_copy.setEnabled(has)
         self.btn_delete.setEnabled(has)
         self.btn_apply.setEnabled(has)
+        self.btn_up.setEnabled(has and row > 0)
+        self.btn_down.setEnabled(has and row < self.list.count() - 1)
 
     def _current(self) -> VendorTemplate | None:
         item = self.list.currentItem()
@@ -322,6 +338,37 @@ class TemplateFrame(QFrame):
             return
         self._templates.remove(tmpl)
         self._persist()
+
+    def _on_copy(self):
+        """复制当前模板为同名加「 副本」后缀的新模板，追加到列表末尾。"""
+        tmpl = self._current()
+        if tmpl is None:
+            return
+        tmpl_copy = deepcopy(tmpl)
+        tmpl_copy.name = f"{tmpl.name} 副本"
+        self._templates.append(tmpl_copy)
+        self._persist()
+        self.list.setCurrentRow(len(self._templates) - 1)
+
+    def _on_move_up(self):
+        """上移：与前一模板交换位置，保持选中跟随移动。"""
+        row = self.list.currentRow()
+        if row <= 0:
+            return
+        self._templates[row], self._templates[row - 1] = \
+            self._templates[row - 1], self._templates[row]
+        self._persist()
+        self.list.setCurrentRow(row - 1)
+
+    def _on_move_down(self):
+        """下移：与后一模板交换位置，保持选中跟随移动。"""
+        row = self.list.currentRow()
+        if row < 0 or row >= len(self._templates) - 1:
+            return
+        self._templates[row], self._templates[row + 1] = \
+            self._templates[row + 1], self._templates[row]
+        self._persist()
+        self.list.setCurrentRow(row + 1)
 
     def _on_apply(self):
         tmpl = self._current()

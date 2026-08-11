@@ -128,8 +128,6 @@ def prepare_metadata(font: TTFont, font_setting: dict):
 
 def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
     """Fetch the metadata from the font settings and write them back to the font file."""
-    # get the font style settings
-    width = font["OS/2"].usWidthClass
     weight = font["OS/2"].usWeightClass
     italic = font["OS/2"].fsSelection & 1 << 0
     # loop through all langIDs
@@ -137,19 +135,13 @@ def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
         # get the preferred font family and subfamily
         p_family = font_setting.get((16, platformID, platEncID, langID), "")
         s_family = font_setting.get((17, platformID, platEncID, langID), "")
-        # get the font style strings（宽度 5=正常，不产生宽度词）
-        lang = translations.lang_of(langID)
-        weight_str = translations.weight_label(weight, lang)
-        width_str = "" if width == 5 else translations.width_label(width, lang)
 
-        # 1 Font Family
-        font_family = [p_family]
-        if weight not in (400, 700):
-            font_family.append(weight_str)
-        if width_str:
-            font_family.append(width_str)
-        font_family = " ".join(font_family)
-        font["name"].setName(font_family, 1, platformID, platEncID, langID)
+        # 1 Font Family（原样写入家族名列值；留空则删除该记录，不再按字重/字宽拼接重建）
+        family_name = font_setting.get((1, platformID, platEncID, langID), "").strip()
+        if family_name:
+            font["name"].setName(family_name, 1, platformID, platEncID, langID)
+        else:
+            font["name"].removeNames(1, platformID, platEncID, langID)
         # 2 Font Subfamily
         font_subfamily = ["Bold"] if weight == 700 else []
         if italic:

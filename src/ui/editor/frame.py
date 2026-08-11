@@ -76,11 +76,14 @@ class EditorFrame(QFrame):
         self.action_save.triggered.connect(self._on_save)
         self.action_rename = Action(FIF.TAG, "重命名")
         self.action_rename.triggered.connect(self._on_rename)
+        self.action_clear = Action(FIF.DELETE, "清空")
+        self.action_clear.triggered.connect(self._on_clear)
         self.cmd_bar.addAction(self.action_import)
         self.cmd_bar.addAction(self.action_template)
         self.cmd_bar.addAction(self.action_parse)
         self.cmd_bar.addAction(self.action_save)
         self.cmd_bar.addAction(self.action_rename)
+        self.cmd_bar.addAction(self.action_clear)
         # CommandBar 无内在宽度、默认 4px 间距，固定为内容宽度避免被网格拉伸后按钮挤在左边
         self.cmd_bar.resizeToSuitableWidth()
         # CommandBar 内部按钮（addAction 顺序与 _widgets 对应），供下拉菜单定位
@@ -89,6 +92,7 @@ class EditorFrame(QFrame):
         self.btn_parse = self.cmd_bar._widgets[2]
         self.btn_save = self.cmd_bar._widgets[3]
         self.btn_rename = self.cmd_bar._widgets[4]
+        self.btn_clear = self.cmd_bar._widgets[5]
 
         # ---- 第 2 行：简繁日英 + 开关 ----
         self.lang_toggles: dict[str, ToggleButton] = {}
@@ -281,6 +285,29 @@ class EditorFrame(QFrame):
                           parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
         if entries:
             self.table.setCurrentIndex(self.model.index(0, 0))
+
+    def _on_clear(self):
+        """清空当前表格的全部字体（仅清空表格，不修改字体文件）。"""
+        entries = self.model.get_entries()
+        if not entries:
+            InfoBar.info("表格已为空", "当前表格没有字体。", parent=self.window(),
+                         position=InfoBarPosition.TOP, duration=3000)
+            return
+        if self._worker is not None:
+            InfoBar.warning("正在加载中", "请等待当前导入完成后重试。", parent=self.window(),
+                            position=InfoBarPosition.TOP, duration=3000)
+            return
+        box = MessageBox(
+            "确认清空",
+            f"将清空当前表格的全部 {len(entries)} 个字体（仅清空表格，不修改字体文件）。",
+            self.window(),
+        )
+        box.yesButton.setText("清空")
+        box.cancelButton.setText("取消")
+        if not box.exec():
+            return
+        self.model.set_entries([])
+        self.status_label.setText("已清空")
 
     # ---------------------------------------------------------------- 保存
 
