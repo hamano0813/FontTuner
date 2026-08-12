@@ -90,9 +90,10 @@ class UserFontManageDialog(MessageBoxBase):
         entries = userfont.list_user_fonts()
         self.table.setRowCount(len(entries))
         self._rows = []
-        # 按钮撑满「操作」单元格（列宽-8、行高-4），贴合任意 DPI，不随 QSS 最小高度溢出
+        # 按钮宽度撑满「操作」单元格（列宽-8），高度用紧凑固定值（26）而非撑满整行，
+        # 更矮更精致；setFixedSize 强制尺寸，不随 QSS 最小高度溢出，任意 DPI 都贴合
         btn_w = max(self.table.horizontalHeader().sectionSize(3) - 8, 40)
-        btn_h = max(self.table.verticalHeader().defaultSectionSize() - 4, 20)
+        btn_h = 26
         for row, entry in enumerate(entries):
             exists = os.path.isfile(entry["path"])
             fam_item = QTableWidgetItem(entry["family"])

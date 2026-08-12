@@ -116,8 +116,8 @@ class FontManagerFrame(QFrame):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        header.resizeSection(0, 320)
-        header.resizeSection(1, 240)
+        header.resizeSection(0, 400)
+        header.resizeSection(1, 320)
         header.resizeSection(2, 90)
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.currentItemChanged.connect(self._on_current_item_changed)
@@ -348,6 +348,7 @@ class FontManagerFrame(QFrame):
         version = node.get("version") or ""
         item = QTreeWidgetItem(
             [node["name"], win_name, str(glyphs) if glyphs else "", version])
+        item.setTextAlignment(2, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)  # 字符数右对齐
         # 目录用文件夹图标，字体（含 TTC/OTC 与其 face 子节点）用字体图标，便于区分
         is_font = node["is_font"] or node.get("is_font_face")
         item.setIcon(0, FIF.FONT.icon() if is_font else FIF.FOLDER.icon())
