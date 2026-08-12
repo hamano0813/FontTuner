@@ -41,11 +41,15 @@ def user_fonts_dir() -> str:
 
 
 def _strip_suffix(name: str) -> str:
-    """注册表值名去掉「 (TrueType)/(OpenType)」后缀，得到家族名。"""
+    """注册表值名去掉「 (TrueType)/(OpenType)」后缀，并去首尾空白，得到家族名。
+
+    Windows 偶发的值名在真后缀前多一个空格（如「方正悠宋+ GBK 503L  (TrueType)」），
+    只去后缀会留下尾随空格，导致与字体库读出的家族名匹配不上，这里一并 strip。
+    """
     for suffix in (" (OpenType)", " (TrueType)"):
         if name.endswith(suffix):
-            return name[: -len(suffix)]
-    return name
+            return name[: -len(suffix)].strip()
+    return name.strip()
 
 
 def _under_user_dir(path: str) -> bool:
@@ -91,10 +95,13 @@ def installed_user_families() -> set[str]:
 
 
 def find_user_font(family: str) -> str:
-    """按家族名找已安装到当前用户的字体文件路径；未安装返回 ''。"""
+    """按家族名找已安装到当前用户的字体文件路径；未安装返回 ''。
+
+    匹配值名用本地化显示名（如「方正悠黑_GBK 503L」），与 _strip_suffix 对齐做 strip。
+    """
     if _cache is None:
         refresh_user_font_cache()
-    return (_cache or {}).get(family.lower(), "")
+    return (_cache or {}).get(family.strip().lower(), "")
 
 
 # ---------------------------------------------------------------- 安装
@@ -167,8 +174,53 @@ def _delete_with_retry(path: str) -> tuple[bool, bool]:
     return False, _schedule_delete_on_reboot(path)
 
 
+def list_user_fonts() -> list[dict]:
+    """当前用户已安装字体清单（读 HKCU 注册表一次）。
+
+    Returns
+    -------
+    [{value_name, family, path}, …] — value_name 为注册表值名（含后缀），
+    family 为去掉后缀的显示名，path 为注册表指向的字体文件全路径。
+    按注册表值名排序，文件是否真实存在由调用方自行判断。
+    """
+    out: list[dict] = []
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _KEY)
+    except OSError:
+        return out
+    try:
+        for i in range(winreg.QueryInfoKey(key)[1]):
+            name, data, _ = winreg.EnumValue(key, i)
+            if not isinstance(data, str) or not data.strip():
+                continue
+            if not _under_user_dir(data):
+                continue
+            family = _strip_suffix(name)
+            if family:
+                out.append({"value_name": name, "family": family, "path": data})
+    finally:
+        key.Close()
+    out.sort(key=lambda e: e["family"].casefold())
+    return out
+
+
 def uninstall_from_user(family: str) -> tuple[bool, str, str]:
-    """取消当前用户安装：删注册表值 → 广播 → 删文件（重试/延迟重启）。
+    """取消当前用户安装（按家族名）：查得注册表指向路径后委托按路径卸载。
+
+    家族名匹配依赖本地化显示名（与 _strip_suffix 对齐）；找不到登记视为已完成（幂等）。
+    """
+    path = find_user_font(family)
+    if not path:
+        return True, "deleted", ""  # 未安装，视为已完成（幂等）
+    return uninstall_user_font_by_path(path)
+
+
+def uninstall_user_font_by_path(path: str) -> tuple[bool, str, str]:
+    """取消当前用户安装（按注册表指向的文件路径精确匹配）。
+
+    在 HKCU Fonts 键里找「数据 == path」的注册表值删除——不依赖家族名，
+    本地化显示名/重复名都能可靠命中；再删文件（重试/延迟重启）。
+    未找到登记时仅尝试删文件（孤儿文件清理）。路径大小写不敏感比对。
 
     Returns
     -------
@@ -177,7 +229,6 @@ def uninstall_from_user(family: str) -> tuple[bool, str, str]:
               "locked" 文件删不掉也未安排（罕见） / "failed" 注册表操作失败
     """
     value_name = None
-    target = None
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _KEY, 0, winreg.KEY_READ | winreg.KEY_WRITE)
     except OSError as exc:
@@ -185,27 +236,31 @@ def uninstall_from_user(family: str) -> tuple[bool, str, str]:
     try:
         for i in range(winreg.QueryInfoKey(key)[1]):
             name, data, _ = winreg.EnumValue(key, i)
-            if not isinstance(data, str) or not data.strip():
-                continue
-            if _strip_suffix(name).lower() != family.lower():
-                continue
-            if not _under_user_dir(data):
-                continue
-            value_name, target = name, data
-            winreg.DeleteValue(key, name)
-            break
+            if (isinstance(data, str) and data.strip()
+                    and os.path.normcase(data) == os.path.normcase(path)):
+                value_name = name
+                winreg.DeleteValue(key, name)
+                break
     except OSError as exc:
         return False, "failed", f"删除注册表值失败：{exc}"
     finally:
         key.Close()
 
-    if target is None:
-        return True, "deleted", ""  # 未找到登记，视为已完成（幂等）
+    if value_name is None:
+        # 注册表无登记（孤儿文件）：仅尝试删文件；文件已不在则直接视为完成
+        if os.path.isfile(path):
+            deleted, deferred = _delete_with_retry(path)
+            if deferred:
+                return True, "deferred", path
+        return True, "deleted", ""
     _notify_font_change()
-    deleted, deferred = _delete_with_retry(target)
+    if os.path.isfile(path):
+        deleted, deferred = _delete_with_retry(path)
+    else:
+        deleted, deferred = True, False  # 文件已不在，注册表条目已删即完成
     refresh_user_font_cache()
     if deleted:
         return True, "deleted", ""
     if deferred:
-        return True, "deferred", target
-    return True, "locked", target
+        return True, "deferred", path
+    return True, "locked", path

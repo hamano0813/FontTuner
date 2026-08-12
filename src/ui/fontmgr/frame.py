@@ -43,6 +43,7 @@ from qfluentwidgets.common.smooth_scroll import SmoothMode
 from config import option
 from core import font_register, subtitle_font, userfont
 from ui.fontmgr.subtitle_dialog import SubtitleFontDialog
+from ui.fontmgr.userfont_dialog import UserFontManageDialog
 from ui.fontmgr.worker import RegisterWorker, ScanWorker, UserFontWorker
 
 
@@ -93,6 +94,11 @@ class FontManagerFrame(QFrame):
 
         self.folders_card = FontFoldersCard(self)  # 字体库目录卡：增删目录 + 重新扫描
         self.folders_card.rescanRequested.connect(self._on_rescan)
+        # 目录卡头部追加「用户已装」：当前用户已安装字体管理（读注册表，与库树无关）
+        self.userfont_button = PushButton(FIF.PEOPLE, "用户已装", self)
+        self.userfont_button.setToolTip("列出当前用户已安装的字体（读注册表，与字体库无关），可逐个取消安装")
+        self.userfont_button.clicked.connect(self._on_user_installed_list)
+        self.folders_card.addWidget(self.userfont_button)
 
         self.tree = TreeWidget(self)
         # 禁用平滑滚动（NO_SMOOTH），长目录列表滚动更跟手
@@ -809,7 +815,7 @@ class FontManagerFrame(QFrame):
             items = [item]
 
         to_install: list = []    # (item, path, family)
-        to_uninstall: list = []  # (item, family, path)
+        to_uninstall: list = []  # (item, family, path, installed_path)
         seen_paths: set = set()
         seen_families: set = set()
 
@@ -829,7 +835,7 @@ class FontManagerFrame(QFrame):
                 key = ("u", family.lower())
                 if key not in seen_families:
                     seen_families.add(key)
-                    to_uninstall.append((it, family, path))
+                    to_uninstall.append((it, family, path, installed_path))
             elif it.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                 if path not in seen_paths:
                     seen_paths.add(path)
@@ -918,7 +924,7 @@ class FontManagerFrame(QFrame):
 
     def _on_uninstall_from_user(self, entries):
         """批量取消安装（删除用户目录文件，被占用的重启后自动清理）。"""
-        names = [os.path.basename(p) for _, _, p in entries]
+        names = [os.path.basename(p) for _, _, p, _ in entries]
         preview = "\n".join(f"· {n}" for n in names[:8]) + ("\n…" if len(names) > 8 else "")
         box = MessageBox(
             "取消安装",
@@ -929,8 +935,36 @@ class FontManagerFrame(QFrame):
         box.cancelButton.setText("保留")
         if not box.exec():
             return
-        self._userfont_item_map = {p: it for it, f, p in entries}
-        self._start_userfont([], [(f, p) for it, f, p in entries])
+        # 卸载按注册表指向的副本路径（installed_path）精确匹配，不依赖家族名
+        self._userfont_item_map = {p: it for it, f, p, ip in entries}
+        self._start_userfont([], [(ip, p) for it, f, p, ip in entries])
+
+    def _on_user_installed_list(self) -> None:
+        """打开「当前用户已安装字体」管理框（独立于库树，直接读注册表）。
+
+        库文件/目录丢失、显示名与英文家族名不匹配时，这里仍能逐个取消安装。
+        关闭后若发生了卸载，刷新缓存并更新库树里对应节点恢复可勾选。
+        """
+        dlg = UserFontManageDialog(self.window())
+        dlg.exec()
+        if dlg.removed:
+            self._apply_userfont_removed(dlg.removed)
+
+    def _apply_userfont_removed(self, removed: list[tuple[str, str]]) -> None:
+        """对话框里取消安装后：刷新用户字体缓存，并更新库树对应节点恢复可勾选。
+
+        忙（扫描/注册/用户字体线程运行中）时跳过——下一轮扫描会按注册表自然反映。
+        """
+        if (self._worker is not None or self._register_worker is not None
+                or self._userfont_worker is not None):
+            return
+        userfont.refresh_user_font_cache()
+        removed_paths = {os.path.normcase(os.path.abspath(p)) for _, p in removed}
+        for item in self._items_by_path().values():
+            ip = item.data(0, Qt.ItemDataRole.UserRole + 2) or ""
+            if ip and os.path.normcase(os.path.abspath(ip)) in removed_paths:
+                self._mark_uninstalled(item)
+        self._update_status()
 
     def _on_delete_font_files(self, paths: list[str]) -> None:
         """删除字体文件：确认后从磁盘永久删除，并从树中移除对应节点。"""
@@ -971,20 +1005,20 @@ class FontManagerFrame(QFrame):
 
         两类登记需要先解除（都要文件存在才能干净移除）：
           - 会话级 GDI 注册：path 在 self._registered，走 font_register.unregister_font；
-          - 安装到当前用户：节点带 installed_user_path，走 userfont.uninstall_from_user。
+          - 安装到当前用户：节点带 installed_user_path，走 userfont.uninstall_user_font_by_path
+            （按注册表指向路径精确匹配，不依赖家族名）。
         否则文件删掉后系统字体表/注册表仍引用它，Qt 等会反复尝试打开这个不存在的文件。
         """
         items = self._items_by_path()
         for p in paths:
             key = os.path.normcase(os.path.abspath(p))
             item = items.get(key)
-            family = item.data(0, Qt.ItemDataRole.UserRole + 1) if item is not None else ""
             installed_user_path = item.data(0, Qt.ItemDataRole.UserRole + 2) if item is not None else ""
             if p in self._registered:
                 font_register.unregister_font(p)
                 self._registered.discard(p)
-            if installed_user_path and family:
-                userfont.uninstall_from_user(family)
+            if installed_user_path:
+                userfont.uninstall_user_font_by_path(installed_user_path)
 
     def _remove_tree_paths(self, paths: list[str]) -> None:
         """从树中移除已删除字体文件的节点：清理空目录、刷新目录三态、重套筛选。"""

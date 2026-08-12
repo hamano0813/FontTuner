@@ -524,6 +524,11 @@ def font_node(path: str) -> dict:
         family, _, win_name, en_name, version, glyphs = _cached_names(path)
         node["family"], node["win_name"], node["en_name"] = family, win_name, en_name
         node["version"], node["glyphs"] = version, glyphs
+    # 已安装到当前用户检测：先按 family（英文家族名），未命中再按 win_name（本地化显示名）。
+    # Windows 注册表值名用本地化名（如「方正悠黑_GBK 503L」），纯按英文 family 会漏检中文名
+    # 字体，导致真已安装却显示「未安装」；win_name 正是值名用的那种显示名，兜底命中。
     if node["family"]:
         node["installed_user_path"] = userfont.find_user_font(node["family"])
+    if not node["installed_user_path"] and node["win_name"] and node["win_name"] != node["family"]:
+        node["installed_user_path"] = userfont.find_user_font(node["win_name"])
     return node
