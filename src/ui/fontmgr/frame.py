@@ -103,12 +103,16 @@ class FontManagerFrame(QFrame):
             ["字体文件（勾选即注册到 Windows）", "Windows 标准字体名", "字符数", "版本"])
         header = self.tree.header()
         header.setStretchLastSection(False)
-        # 前三列（字体文件/标准字体名/字符数）Stretch 随窗口缩放均分；
-        # 版本列按内容自适应宽度，避免版本字符串被截断
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        # 前三列 Interactive（初始宽度固定、可手动拖动调整），版本列 Stretch 撑满剩余空间。
+        # 不用 ResizeToContents：qfw 树的 sizeHintForColumn 不可靠（算成 30px），
+        # 版本列按内容自适应反而会塌；给前三列显式初始宽 + 版本列撑满才能始终够宽。
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.resizeSection(0, 320)
+        header.resizeSection(1, 240)
+        header.resizeSection(2, 90)
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.currentItemChanged.connect(self._on_current_item_changed)
         # 多选 + 右键菜单：批量安装/取消安装到当前用户（勾选框仍负责会话级注册）
