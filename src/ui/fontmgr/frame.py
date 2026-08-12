@@ -98,13 +98,17 @@ class FontManagerFrame(QFrame):
         # 禁用平滑滚动（NO_SMOOTH），长目录列表滚动更跟手
         self.tree.scrollDelagate.verticalSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
         self.tree.scrollDelagate.horizonSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
-        self.tree.setColumnCount(2)
-        self.tree.setHeaderLabels(["字体文件（勾选即注册到 Windows）", "Windows 标准字体名"])
+        self.tree.setColumnCount(4)
+        self.tree.setHeaderLabels(
+            ["字体文件（勾选即注册到 Windows）", "Windows 标准字体名", "字符数", "版本"])
         header = self.tree.header()
         header.setStretchLastSection(False)
-        # 两列等宽：都走 Stretch，随窗口缩放始终保持 1:1
+        # 前三列（字体文件/标准字体名/字符数）Stretch 随窗口缩放均分；
+        # 版本列按内容自适应宽度，避免版本字符串被截断
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.currentItemChanged.connect(self._on_current_item_changed)
         # 多选 + 右键菜单：批量安装/取消安装到当前用户（勾选框仍负责会话级注册）
@@ -327,7 +331,11 @@ class FontManagerFrame(QFrame):
 
     def _build_item(self, node: dict) -> QTreeWidgetItem:
         win_name = node.get("win_name") or ""
-        item = QTreeWidgetItem([node["name"], win_name])
+        # 字符数/版本：仅字体节点有值，目录节点为空串
+        glyphs = node.get("glyphs") or 0
+        version = node.get("version") or ""
+        item = QTreeWidgetItem(
+            [node["name"], win_name, str(glyphs) if glyphs else "", version])
         # 目录用文件夹图标，字体（含 TTC/OTC 与其 face 子节点）用字体图标，便于区分
         is_font = node["is_font"] or node.get("is_font_face")
         item.setIcon(0, FIF.FONT.icon() if is_font else FIF.FOLDER.icon())

@@ -42,8 +42,16 @@ def register_font(path: str) -> bool:
 
 
 def unregister_font(path: str) -> bool:
-    """从系统字体表注销字体。成功返回 True（被占用时会失败）。"""
-    if _gdi32.RemoveFontResourceExW(path, _RESOURCE_FLAGS, None):
+    """从系统字体表注销字体。成功返回 True（被占用时会失败）。
+
+    GDI 对同一字体文件按路径计数：上次运行勾选、注册回滚、重复勾选都会使引用数
+    累加，单次 RemoveFontResourceEx 只减一个引用，字体仍会残留在系统字体表。
+    因此循环 Remove 直到失败，把该路径的引用全部排空（被占用时首次即失败，循环即停）。
+    """
+    removed = False
+    while _gdi32.RemoveFontResourceExW(path, _RESOURCE_FLAGS, None):
+        removed = True
+    if removed:
         _notify_font_change()
         return True
     return False
@@ -152,16 +160,19 @@ def _decode_name_raw(platform: int, enc: int, raw: bytes) -> str:
     return raw.decode("utf-16-le" if platform == 0 and enc == 4 else "utf-16-be")
 
 
-def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str]:
-    """struct 直读 name 表，返回 (family, subfamily, win_name, en_name)。
+def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str, str, int]:
+    """struct 直读 name 表 + maxp 表，返回 (family, subfamily, win_name, en_name, version, glyphs)。
 
     family    — 原逻辑第一匹配（nameID 16→1 × 平台 3→0→1），供注册表/用户字体匹配；
     subfamily — 同逻辑取子家族名（nameID 17→2），供 TTC face 展示；
     win_name  — Windows 标准字体名列展示名：按 简→英→日→繁 优先级取同语言
                 家族名(nameID 1)，同语言缺则回退首选家族名(nameID 16)；
                 全缺回退 family；
-    en_name   — 英文家族名（语言 en，nameID 16→1），作下拉框隐藏匹配词，无则回退 family。
-    TTC 取第 face_index 个子字体（默认 0）；失败返回 ("", "", "", "")。
+    en_name   — 英文家族名（语言 en，nameID 16→1），作下拉框隐藏匹配词，无则回退 family；
+    version   — 版本字符串（nameID 5）：按 英→简→日→繁 优先级取同语言版本串，
+                截断到首个分号（去掉厂商/字体工具尾巴）；全缺为空；
+    glyphs    — 字形数（maxp 表 numGlyphs），读取失败为 0。
+    TTC 取第 face_index 个子字体（默认 0）；失败返回 ("", "", "", "", "", 0)。
     """
     try:
         with open(path, "rb") as f:
@@ -171,35 +182,44 @@ def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str
                 f.read(4)  # version
                 num_fonts = struct.unpack(">I", f.read(4))[0]
                 if face_index < 0 or face_index >= num_fonts:
-                    return "", "", "", ""
+                    return "", "", "", "", "", 0
                 # 'ttcf'(4) + version(4) + numFonts(4) 之后是 numFonts 个 32 位子字体偏移
                 f.seek(12 + 4 * face_index)
                 base = struct.unpack(">I", f.read(4))[0]
                 f.seek(base)
                 magic = f.read(4)
             if magic not in (b"\x00\x01\x00\x00", b"OTTO", b"true"):
-                return "", "", "", ""
+                return "", "", "", "", "", 0
             header = f.read(8)  # numTables/searchRange/entrySelector/rangeShift
             if len(header) < 8:
-                return "", "", "", ""
+                return "", "", "", "", "", 0
             num_tables = struct.unpack(">H", header[0:2])[0]
-            name_off = name_len = None
+            name_off = name_len = maxp_off = None
             for _ in range(num_tables):
                 rec = f.read(16)
                 if len(rec) < 16:
-                    return "", "", "", ""
+                    return "", "", "", "", "", 0
+                tag = rec[0:4]
                 offset, length = struct.unpack(">II", rec[8:16])
-                if rec[0:4] == b"name":
+                if tag == b"name":
                     name_off, name_len = offset, length
-                    break
+                elif tag == b"maxp":
+                    maxp_off = offset
             if name_off is None:
-                return "", "", "", ""
+                return "", "", "", "", "", 0
             # TTC 子字体的表偏移是绝对文件偏移（实测 fontTools 与 Windows 字体均如此），
-            # base 只用于定位 sfnt 头，读表数据直接用 name_off
+            # base 只用于定位 sfnt 头，读表数据直接用 name_off / maxp_off
             f.seek(name_off)
             data = f.read(name_len)
             if len(data) < 6:
-                return "", "", "", ""
+                return "", "", "", "", "", 0
+            # 字形数：maxp 表 offset 4 处的 2 字节 numGlyphs（TTF/OTF 均为此布局）
+            glyphs = 0
+            if maxp_off is not None:
+                f.seek(maxp_off)
+                maxp = f.read(6)
+                if len(maxp) >= 6:
+                    glyphs = struct.unpack(">H", maxp[4:6])[0]
             count = struct.unpack(">H", data[2:4])[0]
             string_offset = struct.unpack(">H", data[4:6])[0]
             records = []
@@ -210,12 +230,12 @@ def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str
                 platform, enc, lang_id, nid, length, off = struct.unpack(">HHHHHH", rec)
                 records.append((platform, enc, lang_id, nid, length, off))
     except (OSError, struct.error):
-        return "", "", "", ""
+        return "", "", "", "", "", 0
 
     texts: dict[tuple, str] = {}   # (platform, lang_id, nid) -> 首个文本
     ordered: list[tuple] = []      # 首次出现顺序
     for platform, enc, lang_id, nid, length, off in records:
-        if nid not in (1, 2, 16, 17):
+        if nid not in (1, 2, 5, 16, 17):  # 5=版本字符串，也参与语言分桶
             continue
         raw = data[string_offset + off: string_offset + off + length]
         if len(raw) < length:
@@ -243,11 +263,11 @@ def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str
     family = _first_match(16, 1)
     subfamily = _first_match(17, 2)
 
-    # 按语言收集：best_1=家族名(1)，best_16=首选家族名(16)。
+    # 按语言收集：best_1=家族名(1)，best_16=首选家族名(16)，best_5=版本串(5)。
     # 同语言多平台记录时优先 Windows(3)，其次 Mac(1)/Unicode(0) 兜底，
     # 避免 Mac 记录（尤其 CJK 编码差异）覆盖 Windows 的干净文本。
     _plat_priority = {3: 0, 1: 1, 0: 2}
-    _buckets: dict[int, dict[str, tuple[int, str]]] = {1: {}, 16: {}}
+    _buckets: dict[int, dict[str, tuple[int, str]]] = {1: {}, 5: {}, 16: {}}
     for platform, lang_id, nid in ordered:
         if nid not in _buckets:
             continue
@@ -260,7 +280,16 @@ def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str
         if cur is None or _plat_priority[platform] < cur[0]:
             bucket[lk] = (_plat_priority[platform], texts[(platform, lang_id, nid)])
     best_1 = {k: v[1] for k, v in _buckets[1].items()}
+    best_5 = {k: v[1] for k, v in _buckets[5].items()}
     best_16 = {k: v[1] for k, v in _buckets[16].items()}
+
+    # version：版本字符串按 英→简→日→繁 优先级取（与 win_name 的 简→英→日→繁 不同），
+    # 截断到首个分号去掉厂商/字体工具尾巴（如 "Version 2.00;FontCreator 11.5..."）
+    version = ""
+    for lk in ("en", "sc", "jp", "tc"):
+        if lk in best_5:
+            version = best_5[lk].split(";", 1)[0].strip()
+            break
 
     # win_name：简→英→日→繁，取同语言家族名(nameID 1)，缺则回退首选家族名(nameID 16)
     win_name = ""
@@ -278,14 +307,14 @@ def _read_name_table(path: str, face_index: int = 0) -> tuple[str, str, str, str
     en_name = best_16.get("en") or best_1.get("en") or ""
     if not en_name:
         en_name = family
-    return family, subfamily, win_name, en_name
+    return family, subfamily, win_name, en_name, version, glyphs
 
 
 # ---------------------------------------------------------------- 缓存（mtime/size 增量）
 
 _CACHE_PATH = DATA_DIR / "fontmgr_cache.json"
 # 缓存结构版本：win_name 语义（家族名优先、语言优先级 简英日繁）变更时 +1，使旧缓存自动失效重读
-_CACHE_VERSION = 5
+_CACHE_VERSION = 6
 _cache: dict = {}
 # 硬重扫标志：重新扫描按钮置位，使名称读取跳过 mtime/size 缓存，
 # 对已存在的文件也强制重读名称表，并回写刷新缓存条目
@@ -318,18 +347,18 @@ def save_cache() -> None:
         pass
 
 
-def _cached_names(path: str) -> tuple[str, str, str, str]:
+def _cached_names(path: str) -> tuple[str, str, str, str, str, int]:
     """按 size+mtime 命中缓存则直接复用名称（不打开文件）；否则 struct 直读并更新缓存。
 
-    返回 (family, subfamily, win_name, en_name)，与 _read_name_table 顺序一致。
-    旧缓存条目缺 win_name/en_name 时回退 family。
+    返回 (family, subfamily, win_name, en_name, version, glyphs)，与 _read_name_table 顺序一致。
+    旧缓存条目缺 win_name/en_name/version/glyphs 时回退 family / 空值。
     """
     key = os.path.normcase(os.path.abspath(path))
     try:
         st = os.stat(path)
         size, mtime = st.st_size, st.st_mtime
     except OSError:
-        return "", "", "", ""
+        return "", "", "", "", "", 0
     cached = _cache.get(key)
     if (not _hard_rescan and cached and cached.get("v") == _CACHE_VERSION
             and cached.get("size") == size and cached.get("mtime") == mtime):
@@ -337,20 +366,23 @@ def _cached_names(path: str) -> tuple[str, str, str, str]:
         subfamily = cached.get("subfamily") or ""
         win_name = cached.get("win_name")
         en_name = cached.get("en_name")
+        version = cached.get("version") or ""
+        glyphs = cached.get("glyphs") or 0
         return family, subfamily, (
             win_name if win_name is not None else family), (
-            en_name if en_name is not None else family)
-    family, subfamily, win_name, en_name = _read_name_table(path)
+            en_name if en_name is not None else family), version, glyphs
+    family, subfamily, win_name, en_name, version, glyphs = _read_name_table(path)
     _cache[key] = {"v": _CACHE_VERSION, "family": family, "subfamily": subfamily,
                    "win_name": win_name, "en_name": en_name,
+                   "version": version, "glyphs": glyphs,
                    "size": size, "mtime": mtime}
-    return family, subfamily, win_name, en_name
+    return family, subfamily, win_name, en_name, version, glyphs
 
 
 def _cached_faces(path: str) -> list[dict]:
     """读取 TTC/OTC 全部 face 的名称列表（按 size+mtime+版本 缓存）。
 
-    每个 face：{family, subfamily, win_name, en_name}；读取失败返回 []。
+    每个 face：{family, subfamily, win_name, en_name, version, glyphs}；读取失败返回 []。
     """
     key = os.path.normcase(os.path.abspath(path))
     try:
@@ -374,9 +406,10 @@ def _cached_faces(path: str) -> list[dict]:
         return []
     faces = []
     for i in range(num):
-        family, subfamily, win_name, en_name = _read_name_table(path, i)
+        family, subfamily, win_name, en_name, version, glyphs = _read_name_table(path, i)
         faces.append({"family": family, "subfamily": subfamily,
-                      "win_name": win_name, "en_name": en_name})
+                      "win_name": win_name, "en_name": en_name,
+                      "version": version, "glyphs": glyphs})
     entry = _cache.get(key) or {}
     entry["v"] = _CACHE_VERSION
     entry["size"] = size
@@ -410,6 +443,8 @@ def scan_folder_tree(root: str, errors: list) -> dict | None:
         "family": "",
         "win_name": "",
         "en_name": "",
+        "version": "",
+        "glyphs": 0,
         "is_font": False,
         "is_font_face": False,
         "installed": False,
@@ -447,6 +482,8 @@ def _face_node(face: dict, index: int) -> dict:
         "family": family,
         "win_name": face.get("win_name") or "",
         "en_name": face.get("en_name") or "",
+        "version": face.get("version") or "",
+        "glyphs": face.get("glyphs") or 0,
         "is_font": False,
         "is_font_face": True,
         "installed": False,
@@ -466,6 +503,8 @@ def font_node(path: str) -> dict:
         "family": "",
         "win_name": "",
         "en_name": "",
+        "version": "",
+        "glyphs": 0,
         "is_font": True,
         "is_font_face": False,
         "installed": is_font_installed(path),
@@ -479,9 +518,12 @@ def font_node(path: str) -> dict:
             node["family"] = faces[0]["family"]
             node["win_name"] = faces[0]["win_name"]
             node["en_name"] = faces[0]["en_name"]
+            node["version"] = faces[0].get("version") or ""
+            node["glyphs"] = faces[0].get("glyphs") or 0
     else:
-        family, _, win_name, en_name = _cached_names(path)
+        family, _, win_name, en_name, version, glyphs = _cached_names(path)
         node["family"], node["win_name"], node["en_name"] = family, win_name, en_name
+        node["version"], node["glyphs"] = version, glyphs
     if node["family"]:
         node["installed_user_path"] = userfont.find_user_font(node["family"])
     return node
