@@ -577,19 +577,21 @@ class FontManagerFrame(QFrame):
     def _on_subtitle_adapt(self):
         """字幕字体适配：选 .ass/.ssa 文件，把用到的字体名批量替换为当前字体库中的字体。"""
         paths, _ = QFileDialog.getOpenFileNames(
-            self.window(), "选择字幕文件（可多选）", "",
+            self.window(), "选择字幕文件（可多选）", option.subtitle_dir.value or "",
             "字幕文件 (*.ass *.ssa);;所有文件 (*.*)")
         if not paths:
             return
+        qconfig.set(option.subtitle_dir, os.path.dirname(paths[0]))  # 记住上次选择，下次从这里打开
         self._run_subtitle_adapt(paths)
 
     def _on_subtitle_adapt_dir(self):
         """字幕字体适配（目录）：递归读取目录下所有 .ass/.ssa 文件。"""
         dir_ = QFileDialog.getExistingDirectory(
             self.window(), "选择字幕所在文件夹（递归读取 .ass/.ssa）",
-            option.import_dir.value or "")
+            option.subtitle_dir.value or "")
         if not dir_:
             return
+        qconfig.set(option.subtitle_dir, dir_)  # 记住上次选择，下次从这里打开
         paths: list[str] = []
         for root, _, files in os.walk(dir_):
             for fn in files:

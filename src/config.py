@@ -38,6 +38,9 @@ class Option(QConfig):
     # 解包/打包页的输出目录，供文件对话框记忆
     package_out_dir = ConfigItem("OPTION", "PACKAGE_OUT_DIR", "", FolderValidator())
 
+    # 字幕字体适配的起始目录（文件/文件夹对话框记忆上次选择，避免每次都回到固定路径）
+    subtitle_dir = ConfigItem("OPTION", "SUBTITLE_DIR", "", FolderValidator())
+
     # 字体管理页扫描的字体库目录列表（持久化，重启后自动重新扫描）
     fontmgr_folders = ConfigItem("OPTION", "FONTMGR_FOLDERS", [], FolderListValidator())
 
