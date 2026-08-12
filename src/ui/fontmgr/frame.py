@@ -41,7 +41,7 @@ from qfluentwidgets import (
 from qfluentwidgets.common.smooth_scroll import SmoothMode
 
 from config import option
-from core import font_register, subtitle_font
+from core import font_register, subtitle_font, userfont
 from ui.fontmgr.subtitle_dialog import SubtitleFontDialog
 from ui.fontmgr.worker import RegisterWorker, ScanWorker, UserFontWorker
 
@@ -946,6 +946,9 @@ class FontManagerFrame(QFrame):
         box.cancelButton.setText("取消")
         if not box.exec():
             return
+        # 删除前先清理系统登记：已勾选注册的注销、已安装到当前用户的取消安装。
+        # 顺序很重要——GDI 注销/取消安装需要文件存在才能干净移除，必须先于删文件。
+        self._deregister_before_delete(paths)
         deleted: list[str] = []
         failed: list[str] = []
         for p in paths:
@@ -962,6 +965,26 @@ class FontManagerFrame(QFrame):
         else:
             InfoBar.success("已删除字体文件", f"共删除 {len(deleted)} 个字体文件",
                             parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+
+    def _deregister_before_delete(self, paths: list[str]) -> None:
+        """删除字体文件前，先清理它在系统的登记，避免留下指向已删文件的残留。
+
+        两类登记需要先解除（都要文件存在才能干净移除）：
+          - 会话级 GDI 注册：path 在 self._registered，走 font_register.unregister_font；
+          - 安装到当前用户：节点带 installed_user_path，走 userfont.uninstall_from_user。
+        否则文件删掉后系统字体表/注册表仍引用它，Qt 等会反复尝试打开这个不存在的文件。
+        """
+        items = self._items_by_path()
+        for p in paths:
+            key = os.path.normcase(os.path.abspath(p))
+            item = items.get(key)
+            family = item.data(0, Qt.ItemDataRole.UserRole + 1) if item is not None else ""
+            installed_user_path = item.data(0, Qt.ItemDataRole.UserRole + 2) if item is not None else ""
+            if p in self._registered:
+                font_register.unregister_font(p)
+                self._registered.discard(p)
+            if installed_user_path and family:
+                userfont.uninstall_from_user(family)
 
     def _remove_tree_paths(self, paths: list[str]) -> None:
         """从树中移除已删除字体文件的节点：清理空目录、刷新目录三态、重套筛选。"""
