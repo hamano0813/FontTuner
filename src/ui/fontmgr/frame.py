@@ -142,6 +142,8 @@ class FontManagerFrame(QFrame):
         self.preview_label.setText("（请在树中选择要预览的字体）")
         self._preview_family: str | None = None
         self._preview_font_id: int | None = None
+        self._preview_weight = QFont.Weight.Normal  # 当前预览字体的字重（同家族多字重需精确指定）
+        self._preview_italic = False
         option.preview_sample.valueChanged.connect(self._render_preview)
         option.preview_font_size.valueChanged.connect(self._render_preview)
 
@@ -355,6 +357,7 @@ class FontManagerFrame(QFrame):
         item.setData(0, Qt.ItemDataRole.UserRole + 4, win_name)  # Windows 标准字体名
         item.setData(0, Qt.ItemDataRole.UserRole + 5, node.get("en_name") or "")  # 英文系统名（隐藏匹配词）
         item.setData(0, Qt.ItemDataRole.UserRole + 6, bool(node.get("is_font")))  # 是否字体文件
+        item.setData(0, Qt.ItemDataRole.UserRole + 7, node.get("subfamily") or "")  # 子家族（字重），安装到用户时区分同名家族
         installed_user_path = node.get("installed_user_path") or ""
         if node.get("is_font_face"):
             # TTC/OTC 内的 face 子节点：仅展示，不可勾选（只能勾选整个集合文件）
@@ -814,7 +817,7 @@ class FontManagerFrame(QFrame):
             item.setSelected(True)
             items = [item]
 
-        to_install: list = []    # (item, path, family)
+        to_install: list = []    # (item, path, family, subfamily)
         to_uninstall: list = []  # (item, family, path, installed_path)
         seen_paths: set = set()
         seen_families: set = set()
@@ -831,6 +834,7 @@ class FontManagerFrame(QFrame):
             installed_path = it.data(0, Qt.ItemDataRole.UserRole + 2)
             family = it.data(0, Qt.ItemDataRole.UserRole + 1) or \
                 os.path.splitext(os.path.basename(path))[0]
+            subfamily = it.data(0, Qt.ItemDataRole.UserRole + 7) or ""
             if installed_path:
                 key = ("u", family.lower())
                 if key not in seen_families:
@@ -839,7 +843,7 @@ class FontManagerFrame(QFrame):
             elif it.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                 if path not in seen_paths:
                     seen_paths.add(path)
-                    to_install.append((it, path, family))
+                    to_install.append((it, path, family, subfamily))
 
         for it in items:
             walk(it)
@@ -909,7 +913,7 @@ class FontManagerFrame(QFrame):
     def _on_install_to_user(self, entries):
         """批量安装到当前用户（单个直接执行；批量先确认）。"""
         if len(entries) > 1:
-            names = [os.path.basename(p) for _, p, _ in entries]
+            names = [os.path.basename(p) for _, p, _, _ in entries]
             preview = "\n".join(f"· {n}" for n in names[:8]) + ("\n…" if len(names) > 8 else "")
             box = MessageBox(
                 "安装到当前用户",
@@ -919,8 +923,8 @@ class FontManagerFrame(QFrame):
             box.cancelButton.setText("取消")
             if not box.exec():
                 return
-        self._userfont_item_map = {p: it for it, p, _ in entries}
-        self._start_userfont([(p, f) for _, p, f in entries], [])
+        self._userfont_item_map = {p: it for it, p, _, _ in entries}
+        self._start_userfont([(p, f, s) for _, p, f, s in entries], [])
 
     def _on_uninstall_from_user(self, entries):
         """批量取消安装（删除用户目录文件，被占用的重启后自动清理）。"""
@@ -1161,7 +1165,13 @@ class FontManagerFrame(QFrame):
         self._preview_font(installed_path or path)
 
     def _preview_font(self, path: str) -> None:
-        """进程内注册字体（QFontDatabase）并取家族名，供渲染预览。"""
+        """进程内注册字体（QFontDatabase）并取家族名+真实字重，供渲染预览。
+
+        同一家族名下的不同字重文件（如 Maple Mono NF CN 的 Bold/Light…）若只用
+        家族名建 QFont，Qt 字体引擎会按家族名缓存并钉死在某个 face，连续预览第
+        3 次起不再切换。这里按字体二进制的真实 usWeightClass/斜体位（font_style）
+        建 QFont，每个文件映射到不同字体配置，稳定命中刚加载的 face。
+        """
         if self._preview_font_id is not None:
             QFontDatabase.removeApplicationFont(self._preview_font_id)
             self._preview_font_id = None
@@ -1173,6 +1183,7 @@ class FontManagerFrame(QFrame):
         self._preview_font_id = fam_id
         families = QFontDatabase.applicationFontFamilies(fam_id)
         self._preview_family = families[0] if families else None
+        self._preview_weight, self._preview_italic = font_register.font_style(path)
         self._render_preview()
 
     def _render_preview(self) -> None:
@@ -1182,7 +1193,11 @@ class FontManagerFrame(QFrame):
             self.preview_label.setText("（该字体无法预览）")
             return
         text = option.preview_sample.value or " "
-        self.preview_label.setFont(QFont(self._preview_family, option.preview_font_size.value))
+        font = QFont(self._preview_family, option.preview_font_size.value)
+        # font_style 返回 int 字重（可能非常规如 275），需按 QFont.Weight 枚举包装
+        font.setWeight(QFont.Weight(self._preview_weight))
+        font.setItalic(self._preview_italic)
+        self.preview_label.setFont(font)
         self.preview_label.setText(text)
 
     def _clear_preview(self) -> None:
@@ -1190,4 +1205,6 @@ class FontManagerFrame(QFrame):
             QFontDatabase.removeApplicationFont(self._preview_font_id)
             self._preview_font_id = None
         self._preview_family = None
+        self._preview_weight = QFont.Weight.Normal
+        self._preview_italic = False
         self.preview_label.setText("（请在树中选择要预览的字体）")

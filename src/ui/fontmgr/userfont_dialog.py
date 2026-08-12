@@ -90,6 +90,9 @@ class UserFontManageDialog(MessageBoxBase):
         entries = userfont.list_user_fonts()
         self.table.setRowCount(len(entries))
         self._rows = []
+        # 按钮撑满「操作」单元格（列宽-8、行高-4），贴合任意 DPI，不随 QSS 最小高度溢出
+        btn_w = max(self.table.horizontalHeader().sectionSize(3) - 8, 40)
+        btn_h = max(self.table.verticalHeader().defaultSectionSize() - 4, 20)
         for row, entry in enumerate(entries):
             exists = os.path.isfile(entry["path"])
             fam_item = QTableWidgetItem(entry["family"])
@@ -99,7 +102,7 @@ class UserFontManageDialog(MessageBoxBase):
             state_item = QTableWidgetItem("已就绪" if exists else "文件缺失")
             state_item.setForeground(QColor("#2aa198") if exists else QColor("#e05757"))
             btn = PrimaryPushButton("取消安装", self.table)
-            btn.setFixedWidth(96)
+            btn.setFixedSize(btn_w, btn_h)
             btn.clicked.connect(lambda _, r=row: self._uninstall_row(r))
             self.table.setItem(row, 0, fam_item)
             self.table.setItem(row, 1, path_item)

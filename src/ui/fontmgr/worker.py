@@ -81,9 +81,9 @@ class RegisterWorker(QThread):
 class UserFontWorker(QThread):
     """批量安装/卸载到当前用户字体，避免复制+注册表阻塞界面。
 
-    to_install 为 [(库路径, 家族名)]，to_uninstall 为 [(注册表指向路径, 库路径)]——
-    卸载按注册表指向的路径精确匹配（本地化显示名也能命中）；库路径仅作界面回填
-    key，worker 不持有任何 Qt 控件引用。
+    to_install 为 [(库路径, 家族名, 子家族/字重)]，to_uninstall 为 [(注册表指向路径,
+    库路径)]——卸载按注册表指向的路径精确匹配（本地化显示名也能命中）；库路径仅作
+    界面回填 key，worker 不持有任何 Qt 控件引用。
     """
 
     progress = Signal(int, int)                     # done, total
@@ -98,8 +98,8 @@ class UserFontWorker(QThread):
         results: list[dict] = []
         total = len(self._to_install) + len(self._to_uninstall)
         done = 0
-        for path, family in self._to_install:
-            ok, error, installed = userfont.install_to_user(path, family)
+        for path, family, subfamily in self._to_install:
+            ok, error, installed = userfont.install_to_user(path, family, subfamily)
             results.append({"kind": "install", "path": path, "family": family,
                             "ok": ok, "message": error, "installed_path": installed})
             done += 1

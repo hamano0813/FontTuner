@@ -127,7 +127,13 @@ def step_uv():
     step("2/9", "准备 UV 工具链与依赖锁定")
 
     run(["uv", "self", "update"], check=False)
-    run(["uv", "lock", "--upgrade"], check=False)
+
+    # 只升级直接依赖（fonttools / pyside6-fluent-widgets），不动无关传递依赖——
+    # 全量 --upgrade 会连带把 macOS 才用的 pyobjc 12.2.1 升到 12.2.2，每次构建都
+    # 弄脏提交在仓库里的 uv.lock（Windows 上根本用不到 pyobjc）。只升级直接依赖
+    # 已足够让安装器拿到最新版项目依赖，锁文件保持干净可复现。
+    run(["uv", "lock", "--upgrade-package", "fonttools",
+         "--upgrade-package", "pyside6-fluent-widgets"], check=False)
 
     # 安装器在部署阶段用 uv.exe 在线装 Python 与依赖（uv.toml 提供镜像）
     uv_exe = Path(os.environ["USERPROFILE"]) / ".local" / "bin" / "uv.exe"
@@ -139,6 +145,13 @@ def step_uv():
     if uv_toml.exists():
         shutil.copy2(uv_toml, DIST_DIR / "uv.toml")
         ok("uv.toml")
+        # uv self update / 重装 uv 可能清掉全局 uv.toml（镜像配置），缺失时从 build/
+        # 副本恢复，保证构建与日常开发仍走 aliyun/python 镜像；已有则不动（尊重用户改动）
+        global_uv_toml = Path(os.environ.get("APPDATA", "")) / "uv" / "uv.toml"
+        if not global_uv_toml.exists():
+            global_uv_toml.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(uv_toml, global_uv_toml)
+            log(f"已从 build/uv.toml 恢复全局 uv 配置: {global_uv_toml}")
 
     for f in (".python-version", "pyproject.toml", "uv.lock"):
         src = PROJECT_ROOT / f

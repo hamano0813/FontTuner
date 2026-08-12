@@ -117,8 +117,26 @@ def _unique_target(library_path: str) -> str:
     return target
 
 
-def install_to_user(library_path: str, family: str) -> tuple[bool, str, str]:
+def _styled_name(family: str, subfamily: str = "") -> str:
+    """Windows 惯例的字体注册显示名：常规字重（空/Regular）不带字重后缀，其余带。
+
+    如 family="Maple Mono NF CN"、subfamily="Bold" → "Maple Mono NF CN Bold"；
+    subfamily 为 "Regular"/空 → 只 "Maple Mono NF CN"。与注册表值名（显示名 +
+    「 (TrueType)/(OpenType)」）及 find_user_font 的键一致。
+    """
+    style = (subfamily or "").strip()
+    if not style or style.lower() == "regular":
+        return family
+    return f"{family} {style}"
+
+
+def install_to_user(library_path: str, family: str, subfamily: str = "") -> tuple[bool, str, str]:
     """把字体安装到当前用户：复制 + 注册表 + 广播。
+
+    同一家族名的不同字重（Bold/Italic…）各自注册：注册表值名用「家族名 字重」
+    （常规字重不带后缀），幂等检查同样按该字重名——否则批量安装同家族多字重
+    文件时，第二个起重复命中同家族的幂等检查，只装成一个（实际复制 1 份、注册
+    表只 1 条，却全部提示成功）。
 
     Returns
     -------
@@ -128,9 +146,10 @@ def install_to_user(library_path: str, family: str) -> tuple[bool, str, str]:
         return False, "字体文件不存在", ""
     if not family.strip():
         return False, "无法读取字体家族名", ""
-    existing = find_user_font(family)
+    display = _styled_name(family, subfamily)
+    existing = find_user_font(display)
     if existing and os.path.isfile(existing):
-        return True, "", existing  # 幂等：已安装
+        return True, "", existing  # 幂等：该字重已安装
     target = _unique_target(library_path)
     try:
         os.makedirs(user_fonts_dir(), exist_ok=True)
@@ -138,7 +157,7 @@ def install_to_user(library_path: str, family: str) -> tuple[bool, str, str]:
     except OSError as exc:
         return False, f"复制失败：{exc}", ""
     ext = os.path.splitext(library_path)[1].lower()
-    value_name = f"{family} (OpenType)" if ext in (".otf", ".otc") else f"{family} (TrueType)"
+    value_name = f"{display} (OpenType)" if ext in (".otf", ".otc") else f"{display} (TrueType)"
     try:
         key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, _KEY)
         try:

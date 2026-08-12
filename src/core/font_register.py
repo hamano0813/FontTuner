@@ -347,6 +347,30 @@ def save_cache() -> None:
         pass
 
 
+def font_style(path: str) -> tuple[int, bool]:
+    """字体的真实字重（OS/2 usWeightClass）与斜体标志。
+
+    直接读字体二进制，不依赖子家族名的厂商写法差异（Hairline/Semi Bold/Demi…），
+    供预览按真实字重建 QFont，保证同家族多字重文件能稳定切换渲染 face。
+    读取失败回落 (400, False)；TTC/OTC 取第 1 个 face。
+    """
+    try:
+        from fontTools.ttLib import TTFont
+        font = TTFont(path, fontNumber=0, lazy=True)
+        try:
+            os2 = font.get("OS/2")
+            head = font.get("head")
+            weight = os2.usWeightClass if os2 is not None else 400
+            italic = bool(head is not None and (head.macStyle & 0x02))
+            if os2 is not None:
+                italic = italic or bool(os2.fsSelection & 0x0001)
+            return weight, italic
+        finally:
+            font.close()
+    except Exception:
+        return 400, False
+
+
 def _cached_names(path: str) -> tuple[str, str, str, str, str, int]:
     """按 size+mtime 命中缓存则直接复用名称（不打开文件）；否则 struct 直读并更新缓存。
 
@@ -501,6 +525,7 @@ def font_node(path: str) -> dict:
         "path": path,
         "name": os.path.basename(path),
         "family": "",
+        "subfamily": "",
         "win_name": "",
         "en_name": "",
         "version": "",
@@ -516,19 +541,27 @@ def font_node(path: str) -> dict:
         node["children"] = [_face_node(f, i) for i, f in enumerate(faces)]
         if faces:
             node["family"] = faces[0]["family"]
+            node["subfamily"] = faces[0].get("subfamily") or ""
             node["win_name"] = faces[0]["win_name"]
             node["en_name"] = faces[0]["en_name"]
             node["version"] = faces[0].get("version") or ""
             node["glyphs"] = faces[0].get("glyphs") or 0
     else:
-        family, _, win_name, en_name, version, glyphs = _cached_names(path)
-        node["family"], node["win_name"], node["en_name"] = family, win_name, en_name
+        family, subfamily, win_name, en_name, version, glyphs = _cached_names(path)
+        node["family"], node["subfamily"] = family, subfamily
+        node["win_name"], node["en_name"] = win_name, en_name
         node["version"], node["glyphs"] = version, glyphs
-    # 已安装到当前用户检测：先按 family（英文家族名），未命中再按 win_name（本地化显示名）。
-    # Windows 注册表值名用本地化名（如「方正悠黑_GBK 503L」），纯按英文 family 会漏检中文名
-    # 字体，导致真已安装却显示「未安装」；win_name 正是值名用的那种显示名，兜底命中。
-    if node["family"]:
-        node["installed_user_path"] = userfont.find_user_font(node["family"])
-    if not node["installed_user_path"] and node["win_name"] and node["win_name"] != node["family"]:
+    # 已安装到当前用户检测：先按字重名（family + subfamily，对应「家族名 字重」注册表值名，
+    # 常规字重不带后缀），命中则精确到本字重；未命中再按 family（英文家族名），仍未命中按
+    # win_name（本地化显示名）。Windows 注册表值名用本地化名（如「方正悠黑_GBK 503L」），
+    # 纯按英文 family 会漏检中文名字体，导致真已安装却显示「未安装」；win_name 兜底命中。
+    family = node.get("family") or ""
+    subfamily = node.get("subfamily") or ""
+    if family:
+        if subfamily and subfamily.lower() != "regular":
+            node["installed_user_path"] = userfont.find_user_font(f"{family} {subfamily}")
+        if not node["installed_user_path"]:
+            node["installed_user_path"] = userfont.find_user_font(family)
+    if not node["installed_user_path"] and node["win_name"] and node["win_name"] != family:
         node["installed_user_path"] = userfont.find_user_font(node["win_name"])
     return node
