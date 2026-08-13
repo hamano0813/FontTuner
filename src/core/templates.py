@@ -1,4 +1,9 @@
-"""信息模板：字段集 + JSON 持久化 + 一键应用。"""
+"""信息模板：字段集 + 字重/字宽/斜体映射表 + JSON 持久化 + 一键应用。
+
+字重/字宽/斜体的文本全部由各模板的映射表定义（weight_map/width_map/italic_map），
+编辑器「模板」列记录应用了哪个模板；解析占位符 {weight_sc} 等时按名查表取文本。
+保存不解析占位符、不自动生成子家族名——解析归「解析」按钮，保存纯写入。
+"""
 
 from __future__ import annotations
 
@@ -7,15 +12,14 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 
-from core import translations
 from core.models import CHARSET_TEMP_CODES, LANGS, NAME_TEMP_CODES, FontEntry
 from core.paths import TEMPLATES_PATH
 
-# 模板可设置的字段：全部 name 字段，排除子家族名(2)。
-# 子家族名在应用模板时按字重隐式写 Bold/Regular，不靠模板编辑。
-TEMPLATE_NAME_IDS = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 256, 257, 258]
-# 应用模板时不从模板读取的字段（兼容旧模板 JSON 里的残留值）
-_TEMPLATE_SKIP_IDS = (2,)
+# 模板可设置的字段：全部 name 字段（含子家族名 2，可填 {width_sc} {weight_sc} 等占位符）
+TEMPLATE_NAME_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 256, 257, 258]
+
+# 映射种类 → 值键类型（加载时还原）
+_MAP_TYPES = {"weight": int, "width": int, "italic": bool}
 
 
 @dataclass
@@ -23,10 +27,32 @@ class VendorTemplate:
     name: str
     field_values: dict[str, dict[int, str]] = field(default_factory=dict)
     # lang_key("ALL"/"SC"/"TC"/"JA"/"EN") -> {nameID: value}
-    translations: dict[str, dict[str, dict]] = field(default_factory=dict)
-    # lang_key("SC"/"TC"/"JA"/"EN") -> {"weight": {value: label}, "width": {...}, "italic": {bool: label}}
-    # 捆绑该厂商的字重/字宽/斜体标签；应用模板时写入全局翻译字典并持久化
+    weight_map: dict[int, dict[str, str]] = field(default_factory=dict)
+    # {字重值: {语言: 文本}}，不定长
+    width_map: dict[int, dict[str, str]] = field(default_factory=dict)
+    # {字宽值: {语言: 文本}}，固定 9 档
+    italic_map: dict[bool, dict[str, str]] = field(default_factory=dict)
+    # {斜体: {语言: 文本}}，固定 2 档
     rename_template: str = ""   # 重命名模板（含 {占位符}；空=应用时不重命名）
+
+
+def _restore_key(value, ktype: type) -> int | bool:
+    return str(value).lower() == "true" if ktype is bool else int(value)
+
+
+def _migrate_translations(translations_data: dict) -> dict:
+    """旧 {lang: {kind: {value: label}}} → 新 {kind: {value: {lang: label}}}。"""
+    out: dict[str, dict] = {kind: {} for kind in _MAP_TYPES}
+    for lang, kinds in translations_data.items():
+        if lang not in LANGS:
+            continue
+        for kind, values in kinds.items():
+            if kind not in _MAP_TYPES:
+                continue
+            for value, label in values.items():
+                v = _restore_key(value, _MAP_TYPES[kind])
+                out[kind].setdefault(v, {})[lang] = label
+    return out
 
 
 def load_templates(path: str | None = None) -> list[VendorTemplate]:
@@ -40,24 +66,28 @@ def load_templates(path: str | None = None) -> list[VendorTemplate]:
         return []
     templates = []
     for item in data:
-        # JSON 对象键恒为字符串，nameID 键需还原为 int，否则编辑回填/应用写入都查不到
-        field_values = {
+        item = dict(item)
+        # JSON 对象键恒为字符串，nameID 键需还原为 int
+        item["field_values"] = {
             lang: {int(nid): text for nid, text in values.items()}
             for lang, values in item.get("field_values", {}).items()
         }
-        # 翻译键同样还原：weight/width 键回 int，italic 键回 bool
-        translations_data: dict[str, dict] = {}
-        for lang, kinds in item.get("translations", {}).items():
-            parsed: dict[str, dict] = {}
-            for kind, values in kinds.items():
-                if kind == "italic":
-                    parsed[kind] = {k.lower() == "true": lbl for k, lbl in values.items()}
-                else:
-                    parsed[kind] = {int(v): lbl for v, lbl in values.items()}
-            translations_data[lang] = parsed
-        item = dict(item)
-        item["field_values"] = field_values
-        item["translations"] = translations_data
+        # 新结构 weight_map/width_map/italic_map（{值: {语言: 文本}}）
+        migrated = {}
+        for kind, ktype in _MAP_TYPES.items():
+            raw = item.get(kind + "_map")
+            if isinstance(raw, dict):
+                item[kind + "_map"] = {
+                    _restore_key(v, ktype): {lng: t for lng, t in vals.items()}
+                    for v, vals in raw.items()
+                }
+        # 旧结构 translations 迁移到三 map（新 map 为空时采用）
+        old_trans = item.pop("translations", None)
+        if old_trans:
+            migrated = _migrate_translations(old_trans)
+            for kind in _MAP_TYPES:
+                if not item.get(kind + "_map"):
+                    item[kind + "_map"] = migrated.get(kind, {})
         templates.append(VendorTemplate(**item))
     return templates
 
@@ -67,16 +97,54 @@ def save_templates(templates: list[VendorTemplate], path: str | None = None) -> 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump([asdict(t) for t in templates], f, ensure_ascii=False, indent=2)
+    invalidate_template_cache()
 
+
+# ---------------------------------------------------------------- 模板查表（解析用）
+
+_template_cache: dict[str, VendorTemplate] | None = None
+
+
+def _load_template_cache() -> dict[str, VendorTemplate]:
+    global _template_cache
+    if _template_cache is None:
+        _template_cache = {t.name: t for t in load_templates()}
+    return _template_cache
+
+
+def invalidate_template_cache() -> None:
+    """模板保存/删除后调用，使解析查表用上最新映射。"""
+    global _template_cache
+    _template_cache = None
+
+
+def template_label(template_name: str, kind: str, value, lang: str) -> str:
+    """从指定模板的映射表取文本；模板/语言/值任一缺失返回空串。"""
+    if not template_name or not lang:
+        return ""
+    tmpl = _load_template_cache().get(template_name)
+    if tmpl is None:
+        return ""
+    mp = {"weight": tmpl.weight_map, "width": tmpl.width_map,
+          "italic": tmpl.italic_map}.get(kind)
+    if not mp:
+        return ""
+    langs = mp.get(value)
+    if not langs:
+        return ""
+    return (langs.get(lang) or "").strip()
+
+
+# ---------------------------------------------------------------- 应用
 
 def apply_template(entry: FontEntry, tmpl: VendorTemplate) -> None:
     """把模板字段应用到单个字体，并自动勾选受影响语言的保存开关。
 
-    模板中为空的字段不覆盖，保留字体原有值；模板文本原样写入，
-    含 `{...}` 占位符的字段不做展开，留给「解析」按钮/保存时解析。
-    子家族名(2) 不从模板读取；对勾选保存的语言隐式写固定文本：
-    字重 700 → Bold，其余 → Regular（不分语言）。
+    记录 entry.template_name 供解析时按模板查字重/字宽/斜体文本；模板字段（含
+    子家族名 2）原样写入、含 `{...}` 占位符不展开，留给「解析」按钮；模板中为
+    空的字段不覆盖，保留字体原有值。
     """
+    entry.template_name = tmpl.name
     all_values = tmpl.field_values.get("ALL", {})
     for lang in LANGS:
         values = dict(all_values)
@@ -84,52 +152,19 @@ def apply_template(entry: FontEntry, tmpl: VendorTemplate) -> None:
         if not values:
             continue
         for name_id, text in values.items():
-            if name_id in _TEMPLATE_SKIP_IDS:
-                continue  # 版权/子家族名不靠模板编辑
             if not text or not text.strip():
                 continue  # 模板字段为空 → 跳过，保留字体原有值
             entry.names[lang][name_id] = text
             entry.save_langs[lang] = True  # 模板可新建该语言记录
-    # 子家族名隐式设置：勾选保存的语言统一写固定文本（不分语言）
-    subfamily = "Bold" if entry.us_weight_class == 700 else "Regular"
-    for lang in LANGS:
-        if entry.save_langs[lang]:
-            entry.names[lang][2] = subfamily
     # 重命名模板：模板内为空则写空（不重命名），非空则填入占位符模板
     entry.rename_template = tmpl.rename_template or ""
-
-
-def apply_translations(tmpl: VendorTemplate) -> int:
-    """把模板捆绑的字重/字宽/斜体标签写入全局翻译字典并持久化。
-
-    模板中为空的标签跳过，保留全局当前值；非空标签覆盖对应 (值, 语言)。
-    返回实际写入的标签数。translations.save() 把生效标签落盘，重启后
-    仍保持该厂商术语。
-    """
-    count = 0
-    for lang, kinds in tmpl.translations.items():
-        for kind, values in kinds.items():
-            for value, label in values.items():
-                if not label or not label.strip():
-                    continue
-                if kind == "weight":
-                    translations.set_weight_label(int(value), lang, label)
-                elif kind == "width":
-                    translations.set_width_label(int(value), lang, label)
-                elif kind == "italic":
-                    translations.set_italic_label(bool(value), lang, label)
-                else:
-                    continue
-                count += 1
-    translations.save()
-    return count
 
 
 def resolve_entry_placeholders(entry: FontEntry, langs: tuple = LANGS) -> int:
     """把 entry 各语言 name 字段中的 `{占位符}` 就地解析为正常文本。
 
-    等价于保存时 build_font_setting 里的隐式解析，这里提前落进表格，
-    让用户直接看到最终文本。无占位符的字段跳过。返回解析的字段数。
+    保存不解析；此函数由「解析」按钮调用，让用户提前看到最终文本。无占位符的
+    字段跳过。返回解析的字段数。
     """
     count = 0
     for lang in langs:
@@ -175,13 +210,16 @@ def format_name(text: str, entry: FontEntry, lang: str) -> str:
     return result
 
 
-def _format_vars(entry: FontEntry, lang: str) -> dict[str, object]:
-    from core.translations import italic_label, weight_label, width_label
+def _entry_label(entry: FontEntry, kind: str, value, lang: str) -> str:
+    """按 entry.template_name 查模板映射表取文本（无模板/缺失返回空）。"""
+    return template_label(entry.template_name, kind, value, lang)
 
+
+def _format_vars(entry: FontEntry, lang: str) -> dict[str, object]:
     vars = {
-        "weight": weight_label(entry.us_weight_class, lang),
-        "width": width_label(entry.us_width_class, lang),
-        "italic": italic_label(entry.italic(), lang),
+        "weight": _entry_label(entry, "weight", entry.us_weight_class, lang),
+        "width": _entry_label(entry, "width", entry.us_width_class, lang),
+        "italic": _entry_label(entry, "italic", entry.italic(), lang),
         "weight_num": entry.us_weight_class,
         "width_num": entry.us_width_class,
     }
@@ -191,9 +229,9 @@ def _format_vars(entry: FontEntry, lang: str) -> dict[str, object]:
         suffix = code.rsplit("_", 1)[1]
         names = entry.names[l]
         vars[code] = entry.temp_names[l]   # {name_sc}
-        vars[f"weight_{suffix}"] = weight_label(entry.us_weight_class, l)
-        vars[f"width_{suffix}"] = width_label(entry.us_width_class, l)
-        vars[f"italic_{suffix}"] = italic_label(entry.italic(), l)
+        vars[f"weight_{suffix}"] = _entry_label(entry, "weight", entry.us_weight_class, l)
+        vars[f"width_{suffix}"] = _entry_label(entry, "width", entry.us_width_class, l)
+        vars[f"italic_{suffix}"] = _entry_label(entry, "italic", entry.italic(), l)
         vars[f"family_{suffix}"] = names.get(1, "")
         vars[f"subfamily_{suffix}"] = names.get(2, "")
         vars[f"preferred_family_{suffix}"] = names.get(16, "")

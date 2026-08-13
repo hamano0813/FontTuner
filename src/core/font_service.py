@@ -11,7 +11,7 @@ from fontTools.ttLib import TTCollection
 
 from core import font_io, mapping, metadata as _metadata
 from core.models import LANGS, FontEntry
-from core.translations import italic_label, weight_label, width_label
+from core.templates import template_label
 
 ProgressFn = Callable[[int, int], None]
 
@@ -89,10 +89,10 @@ class _SafeDict(dict):
         return "{" + key + "}"  # 未识别的占位符原样保留
 
 
-def _first_label(label_fn, value: int, priority: tuple = _FIELD_PRIORITY) -> str:
-    """按语言优先级取第一个非空标签；全空返回空串。"""
+def _first_template_label(entry: FontEntry, kind: str, value, priority: tuple = _FIELD_PRIORITY) -> str:
+    """按模板映射表 + 语言优先级取第一个非空文本；全空返回空串。"""
     for lang in priority:
-        text = (label_fn(value, lang) or "").strip()
+        text = template_label(entry.template_name, kind, value, lang)
         if text:
             return text
     return ""
@@ -114,9 +114,9 @@ def _rename_vars(entry: FontEntry) -> dict[str, str]:
         code = _LANG_CODE[lang]
         names = entry.names[lang]
         vars[f"name_{code}"] = entry.temp_names[lang]
-        vars[f"weight_{code}"] = weight_label(entry.us_weight_class, lang)
-        vars[f"width_{code}"] = width_label(entry.us_width_class, lang)
-        vars[f"italic_{code}"] = italic_label(entry.italic(), lang)
+        vars[f"weight_{code}"] = template_label(entry.template_name, "weight", entry.us_weight_class, lang)
+        vars[f"width_{code}"] = template_label(entry.template_name, "width", entry.us_width_class, lang)
+        vars[f"italic_{code}"] = template_label(entry.template_name, "italic", entry.italic(), lang)
         vars[f"charset_{code}"] = entry.charsets[lang]
         vars[f"family_{code}"] = names.get(1, "")
         vars[f"subfamily_{code}"] = names.get(2, "")
@@ -126,8 +126,8 @@ def _rename_vars(entry: FontEntry) -> dict[str, str]:
     vars.update({
         "首选家族名": _first_nonempty(entry, 16, _NAME_PRIORITY),
         "家族名": _first_nonempty(entry, 16, _NAME_PRIORITY) or _first_nonempty(entry, 1, _NAME_PRIORITY),
-        "weight": _first_label(weight_label, entry.us_weight_class),
-        "width": _first_label(width_label, entry.us_width_class),
+        "weight": _first_template_label(entry, "weight", entry.us_weight_class),
+        "width": _first_template_label(entry, "width", entry.us_width_class),
         "version": _first_nonempty(entry, 5, _FIELD_PRIORITY),
     })
     return vars

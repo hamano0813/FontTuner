@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionButton, QStyledI
 from qfluentwidgets import getFont, isDarkTheme, setFont
 
 from ui.editor.columns import PLACEHOLDER_ROLE
-from ui.editor.editors import CellComboEditor, CellLineEdit
+from ui.editor.editors import CellComboEditor, CellLineEdit, CellSpinBox
 
 # 芯片式单元格参数：格间缝隙 / 圆角半径 / 文字内边距
 _CHIP_GAP = 2
@@ -40,7 +40,21 @@ class BaseCellDelegate(QStyledItemDelegate):
 
     # ---------------------------------------------------------------- 绘制
 
+    def _is_structural_empty(self, index: QModelIndex) -> bool:
+        """结构空单元格：父行×子列 / 子行×父列，不绘制芯片底色。
+
+        树形下父节点只填父列、子节点只填子列，对方类型列恒为空白。
+        """
+        model = index.model()
+        if model is None or not hasattr(model, "node_of") or not hasattr(model, "column_key"):
+            return False
+        is_parent_node = model.node_of(index) == 0
+        is_parent_col = model.column_key(index.column())[0] == "fixed"
+        return is_parent_node != is_parent_col
+
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        if self._is_structural_empty(index):
+            return  # 不绘制芯片，留白
         if self._editing_index is not None and index == self._editing_index:
             self._paint_chip_background(painter, option, index)
             return
@@ -164,15 +178,21 @@ class TextDelegate(BaseCellDelegate):
             editor.setPlaceholderText(hint)
 
 
+class SpinDelegate(BaseCellDelegate):
+    """数值单元格委托（字重 1-1000 数值直编，无下拉）。"""
+    widget_class = CellSpinBox
+
+
 class ComboDelegate(BaseCellDelegate):
     widget_class = CellComboEditor
 
-    def __init__(self, items, parent=None):
+    def __init__(self, items, parent=None, editable: bool = True):
         super().__init__(parent)
         self._items = list(items)
+        self._editable = editable
 
     def createEditor(self, parent: QWidget, option, index: QModelIndex) -> QWidget:
-        editor = CellComboEditor(parent)
+        editor = CellComboEditor(parent, editable=self._editable)
         self._apply_editor_font(editor)
         editor.set_items(self._items)
         return editor
@@ -195,6 +215,8 @@ class CheckBoxDelegate(BaseCellDelegate):
     widget_class = None
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        if self._is_structural_empty(index):
+            return  # 子行×父列（斜体）留白
         self._paint_chip_background(painter, option, index)
         opt = QStyleOptionButton()
         opt.rect = _centered_checkbox_rect(option.rect)
@@ -211,5 +233,52 @@ class CheckBoxDelegate(BaseCellDelegate):
             and index.flags() & Qt.ItemFlag.ItemIsEditable
         ):
             model.setData(index, not bool(index.data(Qt.ItemDataRole.EditRole)), Qt.ItemDataRole.EditRole)
+            return True
+        return False
+
+
+class SaveLangDelegate(BaseCellDelegate):
+    """保存列委托：芯片底 + 居中「复选框 + 语言标签（简/繁/日/英）」，点击切换保存开关。"""
+
+    widget_class = None
+
+    def _text_color(self) -> QColor:
+        return QColor(255, 255, 255) if isDarkTheme() else QColor(0, 0, 0)
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        if self._is_structural_empty(index):
+            return  # 父行×保存列留白
+        self._paint_chip_background(painter, option, index)
+        checked = index.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
+        text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        rect = option.rect
+        style = QApplication.style()
+        indicator = style.pixelMetric(QStyle.PixelMetric.PM_IndicatorWidth)
+        fm = QFontMetrics(getFont(13))
+        text_w = fm.horizontalAdvance(text)
+        gap = 4
+        total = indicator + gap + text_w
+        x = rect.x() + (rect.width() - total) // 2
+        cy = rect.y() + rect.height() // 2
+        opt = QStyleOptionButton()
+        opt.rect = QRect(x, cy - indicator // 2, indicator, indicator)
+        opt.state = QStyle.StateFlag.State_Enabled
+        opt.state |= QStyle.StateFlag.State_On if checked else QStyle.StateFlag.State_Off
+        style.drawControl(QStyle.ControlElement.CE_CheckBox, opt, painter, option.widget)
+        painter.setFont(getFont(13))
+        painter.setPen(self._text_color())
+        painter.drawText(
+            QRect(x + indicator + gap, rect.y(), text_w, rect.height()),
+            Qt.AlignmentFlag.AlignVCenter, text,
+        )
+
+    def editorEvent(self, event, model, option, index: QModelIndex) -> bool:
+        if (
+            event.type() == QEvent.Type.MouseButtonRelease
+            and index.isValid()
+            and index.flags() & Qt.ItemFlag.ItemIsEditable
+        ):
+            checked = index.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
+            model.setData(index, not checked, Qt.ItemDataRole.EditRole)
             return True
         return False

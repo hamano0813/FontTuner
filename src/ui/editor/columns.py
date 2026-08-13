@@ -4,14 +4,11 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
 
-from core.models import EDITABLE_NAME_IDS, LANG_PREFIX, LANGS, MANAGED_NAME_IDS, NAME_ID_LABELS
-from core.translations import weight_label, weight_labels, width_label, width_labels
+from core.constants import WIDTH_LABELS
+from core.models import EDITABLE_NAME_IDS, MANAGED_NAME_IDS, NAME_ID_LABELS
 
 # 单元格输入提示（模板版本号占位）用自定义数据角色返回
 PLACEHOLDER_ROLE = Qt.ItemDataRole.UserRole + 1
-
-# 语言英文代号（用于列英文别名）
-LANG_EN = {"SC": "SC", "TC": "TC", "JA": "JA", "EN": "EN"}
 
 # nameID → 英文名（列英文别名）
 NAME_ID_EN = {
@@ -25,108 +22,61 @@ NAME_ID_EN = {
 
 @dataclass(frozen=True)
 class ColumnDef:
-    key: tuple            # ("fixed", tag) | ("save", lang) | ("lang", lang, nameID)
+    key: tuple            # 父列 ("fixed", tag) | 子列 ("save",)/("temp",)/("charset",)/("lang", nameID)
     header: str
     kind: str             # ro | text | weight | width | italic | save
     editable: bool = True
     en: str = ""          # 英文别名（列头 tooltip / 重命名变量备注）
 
 
-def _lang_header(lang: str, name_id: int) -> str:
-    return f"{LANG_PREFIX[lang]}·{NAME_ID_LABELS[name_id]}"
-
-
-def _lang_en(lang: str, name_id: int) -> str:
-    return f"{LANG_EN[lang]} {NAME_ID_EN[name_id]}"
-
-
 def build_columns() -> list[ColumnDef]:
-    """全部列：4 临时名称列 + 固定列 + 4 保存列 + 每语言组全部 20 个 name 字段。
+    """树形列：父列（字体级，父节点行）+ 子列（语言级，4 个语言子节点行共用）。
 
-    默认只显示 EDITABLE_NAME_IDS 之外的列由视图隐藏（set_extra_fields_visible）。
+    语言是行不是列，故子列 key 不含语言；每个子节点行填全套子列数据。
+    默认只显示 EDITABLE_NAME_IDS 的 name 字段，其余由视图「全部字段」开关展开。
     """
     cols: list[ColumnDef] = []
-    # 表格头部 4 列：临时名称（字体名·简/繁/日/英），供 {name_sc} 等占位符引用
-    for lang in LANGS:
-        cols.append(ColumnDef(("temp", lang), f"字体名·{LANG_PREFIX[lang]}", "text",
-                              en=f"Temp Name {LANG_EN[lang]}"))
-    cols += [
-        ColumnDef(("fixed", "fontPath"), "字体文件", "ro", editable=False, en="Font File"),
-        ColumnDef(("fixed", "renameTemplate"), "重命名模板", "text", en="Rename Template"),
-        ColumnDef(("fixed", "weight"), "字重", "weight", en="Weight"),
-        ColumnDef(("fixed", "width"), "字宽", "width", en="Width"),
-        ColumnDef(("fixed", "italic"), "斜体", "italic", en="Italic"),
-        ColumnDef(("fixed", "numGlyphs"), "字形数", "ro", editable=False, en="Glyph Count"),
-    ]
-    # 字形数后面 4 列：字符集（简体/繁体/GBK 等），供 {charset_sc} 等占位符引用
-    for lang in LANGS:
-        cols.append(ColumnDef(("charset", lang), f"字符集·{LANG_PREFIX[lang]}", "text",
-                              en=f"Charset {LANG_EN[lang]}"))
-    for lang in LANGS:
-        cols.append(ColumnDef(("save", lang), f"保存·{LANG_PREFIX[lang]}", "save",
-                              en=f"Save {LANG_EN[lang]}"))
-    for lang in LANGS:
-        for nid in MANAGED_NAME_IDS:
-            cols.append(ColumnDef(("lang", lang, nid), _lang_header(lang, nid), "text",
-                                  en=_lang_en(lang, nid)))
+    # ---- 父列（字体级）----
+    # 模板列只读：只能通过「应用模板」覆盖，不允许手工输入
+    cols.append(ColumnDef(("fixed", "templateName"), "模板", "text", editable=False, en="Template"))
+    cols.append(ColumnDef(("fixed", "fontPath"), "字体文件", "ro", editable=False, en="Font File"))
+    cols.append(ColumnDef(("fixed", "renameTemplate"), "重命名模板", "text", en="Rename Template"))
+    cols.append(ColumnDef(("fixed", "weight"), "字重", "weight", en="Weight"))
+    cols.append(ColumnDef(("fixed", "width"), "字宽", "width", en="Width"))
+    cols.append(ColumnDef(("fixed", "italic"), "斜体", "italic", en="Italic"))
+    cols.append(ColumnDef(("fixed", "numGlyphs"), "字形数", "ro", editable=False, en="Glyph Count"))
+    # ---- 子列（语言级）----
+    cols.append(ColumnDef(("save",), "保存", "save", en="Save"))
+    cols.append(ColumnDef(("temp",), "字体名", "text", en="Temp Name"))
+    cols.append(ColumnDef(("charset",), "字符集", "text", en="Charset"))
+    for nid in MANAGED_NAME_IDS:
+        cols.append(ColumnDef(("lang", nid), NAME_ID_LABELS[nid], "text", en=NAME_ID_EN[nid]))
     return cols
 
 
 def is_default_visible(key: tuple) -> bool:
     """是否默认显示的列（非 EDITABLE_NAME_IDS 的 name 字段默认隐藏）。"""
     if key[0] == "lang":
-        return key[2] in EDITABLE_NAME_IDS
+        return key[1] in EDITABLE_NAME_IDS
     return True
 
 
 # ---------------------------------------------------------------- 字重/字宽/斜体
 
-def weight_items() -> list[tuple[int, str]]:
-    # 下拉显示「数值 · 英文标签」（如 400 · Regular），数值与翻译页一一对应
-    return [(v, f"{v} · {weight_label(v, 'EN')}") for v in sorted(weight_labels("SC"))]
+# 字重为纯数值（编辑器用 spinbox 1-1000 编辑），不再有下拉项/标签映射。
 
 
 def width_items() -> list[tuple[int, str]]:
-    return [(v, width_label(v, "SC")) for v in sorted(width_labels("SC"))]
-
-
-def format_weight(value) -> str:
-    # 与下拉项一致的显示格式：数值 · 英文标签
-    return f"{value} · {weight_label(value, 'EN')}"
+    # 字宽列写死的简体枚举（与 WIDTH_LABELS 一致）
+    return [(v, WIDTH_LABELS[v]) for v in sorted(WIDTH_LABELS)]
 
 
 def format_width(value) -> str:
-    return width_label(value, "SC")
+    return WIDTH_LABELS.get(value, str(value))
 
 
 def format_italic(value) -> str:
     return "斜体" if value else "正常"
-
-
-def _match_label(labels: dict[int, str], text: str) -> int | None:
-    for v, lbl in labels.items():
-        if text == lbl:
-            return v
-    return None
-
-
-def parse_weight(text) -> int | None:
-    t = (text or "").strip()
-    if not t:
-        return None
-    try:
-        return int(t)
-    except ValueError:
-        pass
-    # 显示格式「400 · Regular」：取数值前缀
-    head = t.split(" · ")[0].strip()
-    if head.isdigit():
-        return int(head)
-    for lang in LANGS:
-        v = _match_label(weight_labels(lang), t)
-        if v is not None:
-            return v
-    return None
 
 
 def parse_width(text) -> int | None:
@@ -134,12 +84,13 @@ def parse_width(text) -> int | None:
     if not t:
         return None
     try:
-        return int(t)
+        v = int(t)
+        if v in WIDTH_LABELS:
+            return v
     except ValueError:
         pass
-    for lang in LANGS:
-        v = _match_label(width_labels(lang), t)
-        if v is not None:
+    for v, lbl in WIDTH_LABELS.items():
+        if t == lbl:
             return v
     return None
 

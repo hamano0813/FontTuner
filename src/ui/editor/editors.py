@@ -2,9 +2,9 @@
 
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import QComboBox, QLineEdit, QSizePolicy, QWidget
+from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath
+from PySide6.QtWidgets import QComboBox, QLineEdit, QSizePolicy, QSpinBox, QToolButton, QWidget
 from qfluentwidgets import ScrollBar, isDarkTheme
 
 
@@ -85,15 +85,17 @@ class CellComboEditor(QComboBox, CellEditor):
     """下拉/可输入单元格编辑器（VAS 主题化：透明背景 + 圆角下拉 + qfw ScrollBar）。
 
     set_items 传入 [(value, label)]；选中项返回其 value，自由输入返回文本。
+    editable=False 时为纯下拉（如字宽列，禁止输入文字，只能选择）。
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, editable: bool = True):
         QComboBox.__init__(self, parent)
         CellEditor.__init__(self, parent)
-        self.setEditable(True)
-        self.lineEdit().setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
-        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.setCompleter(None)
+        self.setEditable(editable)
+        if editable:
+            self.lineEdit().setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
+            self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+            self.setCompleter(None)
         self.setMaxVisibleItems(10)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -210,3 +212,100 @@ class CellComboEditor(QComboBox, CellEditor):
     def apply_alignment(self, alignment) -> None:
         if self.lineEdit() is not None:
             self.lineEdit().setAlignment(alignment)
+
+
+class _SpinArrow(QToolButton):
+    """左右箭头按钮：左箭头递减、右箭头递增（srw CellNumberStepper 同款自绘）。"""
+
+    def __init__(self, right: bool, parent=None):
+        super().__init__(parent)
+        self._right = right
+        self.setFixedSize(20, 24)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, e):
+        parent = self.parent()
+        if self._right:
+            parent.stepUp()
+        else:
+            parent.stepDown()
+
+    def paintEvent(self, e):
+        painter = QPainter(self)
+        painter.setRenderHints(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(200, 200, 200) if isDarkTheme() else QColor(80, 80, 80))
+        s = 5
+        cx, cy = self.width() / 2, self.height() / 2
+        path = QPainterPath()
+        if self._right:
+            path.moveTo(QPointF(cx + s, cy))
+            path.lineTo(QPointF(cx - s, cy - s))
+            path.lineTo(QPointF(cx - s, cy + s))
+        else:
+            path.moveTo(QPointF(cx - s, cy))
+            path.lineTo(QPointF(cx + s, cy - s))
+            path.lineTo(QPointF(cx + s, cy + s))
+        path.closeSubpath()
+        painter.drawPath(path)
+
+
+class CellSpinBox(QSpinBox, CellEditor):
+    """数值单元格编辑器（字重 1-1000）：透明无边框 + 自绘左右箭头按钮（srw 同款）。
+
+    左减右加按钮步进、键盘可直接输入数值；set_value 传入整数值，get_value 返回编辑后数值。
+    """
+
+    def __init__(self, parent=None, minimum: int = 1, maximum: int = 1000):
+        QSpinBox.__init__(self, parent)
+        CellEditor.__init__(self, parent)
+        self.setFrame(False)
+        self.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)  # 用自绘左右箭头
+        self.setRange(minimum, maximum)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        self.setStyleSheet(
+            "QSpinBox { background: transparent; border: none; }"
+        )
+        # 文字颜色直接设在内部 lineEdit（QSpinBox 文本由它绘制），随主题明暗
+        le = self.lineEdit()
+        le.setFrame(False)
+        le.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        le.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        le.setStyleSheet(
+            "background: transparent; border: none; color: #FFFFFF;"
+            if isDarkTheme() else
+            "background: transparent; border: none; color: #000000;"
+        )
+        self._btn_left = _SpinArrow(False, self)
+        self._btn_right = _SpinArrow(True, self)
+        self.valueChanged.connect(self._on_value_changed)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        bw = self._btn_left.width()
+        y = (self.height() - self._btn_left.height()) // 2
+        self._btn_left.move(1, y)
+        self._btn_right.move(self.width() - bw - 1, y)
+
+    def focusInEvent(self, e):
+        super().focusInEvent(e)
+        self.selectAll()
+
+    def get_value(self) -> int:
+        # 以 spinbox 当前值（含用户编辑）为准，避免 _value 滞后于未提交的输入
+        return self.value()
+
+    def format_value(self) -> None:
+        self.blockSignals(True)
+        self.setValue(self._value if self._value is not None else self.minimum())
+        self.blockSignals(False)
+
+    def apply_font(self, font: QFont) -> None:
+        self.setFont(font)
+
+    def apply_alignment(self, alignment) -> None:
+        self.setAlignment(alignment)
+
+    def _on_value_changed(self, v: int) -> None:
+        self._value = v
+        self.dataChanged.emit(self._value)

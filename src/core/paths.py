@@ -4,7 +4,7 @@
 - 开发态：src/core/paths.py → 仓库根（config.json、data/ 就在仓库根）。
 - 部署态：script/core/paths.pyc → 安装根 {app}（源码已编译为 script/ 下的 .pyc）。
 
-config.json 与 data/ 下文件（templates/translations/fontmgr_cache）都是运行时写入的。
+config.json 与 data/ 下文件（templates/fontmgr_cache）都是运行时写入的。
 默认写安装根；若安装根不可写（如装到 Program Files），回落 %APPDATA%\\FontTuner。
 """
 
@@ -38,4 +38,3 @@ def user_data_dir() -> Path:
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = user_data_dir() / "data"
 TEMPLATES_PATH = DATA_DIR / "templates.json"
-TRANSLATIONS_PATH = DATA_DIR / "translations.json"

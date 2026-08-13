@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from fontTools.ttLib import TTFont
 
-from core import translations
-
 
 def load_metadata(font: TTFont):
     """Load the metadata of the font and return them as a dictionary."""
@@ -99,57 +97,30 @@ def prepare_metadata(font: TTFont, font_setting: dict):
         else:
             # add the langID to the set
             langIDs.add((platformID, platEncID, langID))
-            # get font style settings
-            weight = font["OS/2"].usWeightClass
-            width = font["OS/2"].usWidthClass
-            italic = font["OS/2"].fsSelection & 1 << 0
-            # get the font style strings（宽度 5=正常，不产生宽度词）
-            lang = translations.lang_of(langID)
-            weight_str = translations.weight_label(weight, lang)
-            width_str = "" if width == 5 else translations.width_label(width, lang)
-            italic_str = translations.italic_label(italic, lang)
-            # create the font family string if it is empty
-            if not font_setting.get((17, platformID, platEncID, langID)).strip():
-                # 按 OpenType 约定组装：标准样式(400/非斜体/正常宽)只用字重标签，
-                # 否则拼 字重+字宽+斜体，避免生成 "Regular Regular"/"Bold Regular" 冗余
-                parts = []
-                if weight != 400:
-                    parts.append(weight_str)
-                if width_str:
-                    parts.append(width_str)
-                if italic:
-                    parts.append(italic_str)
-                if not parts:
-                    parts.append(weight_str)
-                font_setting[(17, platformID, platEncID, langID)] = " ".join(parts)
     # convert the set to a list and return it
     return list(langIDs)
 
 
 def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
     """Fetch the metadata from the font settings and write them back to the font file."""
-    weight = font["OS/2"].usWeightClass
-    italic = font["OS/2"].fsSelection & 1 << 0
     # loop through all langIDs
     for platformID, platEncID, langID in langIDs:
         # get the preferred font family and subfamily
         p_family = font_setting.get((16, platformID, platEncID, langID), "")
         s_family = font_setting.get((17, platformID, platEncID, langID), "")
 
-        # 1 Font Family（原样写入家族名列值；留空则删除该记录，不再按字重/字宽拼接重建）
+        # 1 Font Family（原样写入家族名列值；留空则删除该记录，不自动生成子家族名）
         family_name = font_setting.get((1, platformID, platEncID, langID), "").strip()
         if family_name:
             font["name"].setName(family_name, 1, platformID, platEncID, langID)
         else:
             font["name"].removeNames(1, platformID, platEncID, langID)
-        # 2 Font Subfamily
-        font_subfamily = ["Bold"] if weight == 700 else []
-        if italic:
-            font_subfamily.append("Italic")
-        font_subfamily = " ".join(font_subfamily)
-        if not font_subfamily:
-            font_subfamily = "Regular"
-        font["name"].setName(font_subfamily, 2, platformID, platEncID, langID)
+        # 2 Font Subfamily（保存纯写入：字段有值写值，无值删记录，不自动拼 Bold/Regular）
+        subfamily = font_setting.get((2, platformID, platEncID, langID), "").strip()
+        if subfamily:
+            font["name"].setName(subfamily, 2, platformID, platEncID, langID)
+        else:
+            font["name"].removeNames(2, platformID, platEncID, langID)
         # 3 Unique ID
         unique_id = font_setting.get((3, platformID, platEncID, langID), "{} {}").format(p_family, s_family, *([""] * 3))
         font["name"].setName(unique_id, 3, platformID, platEncID, langID)

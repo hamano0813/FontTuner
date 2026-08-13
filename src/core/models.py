@@ -47,6 +47,7 @@ class FontEntry:
     temp_names: dict[str, str] = field(default_factory=lambda: {l: "" for l in LANGS})
     charsets: dict[str, str] = field(default_factory=lambda: {l: "" for l in LANGS})
     rename_template: str = ""   # 重命名模板（含 {占位符}；空=不重命名）
+    template_name: str = ""     # 应用的模板名（「模板」列；解析字重/字宽/斜体占位符时按此查表）
     _raw_groups: set[tuple[int, int, int]] = field(default_factory=set, repr=False)
 
     @property

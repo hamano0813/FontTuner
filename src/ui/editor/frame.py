@@ -18,6 +18,7 @@ from qfluentwidgets import (
     isDarkTheme,
     qconfig,
 )
+from qfluentwidgets.components.widgets.command_bar import CommandButton
 
 from config import option
 from core import fs, mapping
@@ -25,15 +26,21 @@ from core.font_service import rename_entries, resolve_rename_template, sort_entr
 from core.models import LANG_PREFIX, LANGS
 from core.templates import (
     apply_template,
-    apply_translations,
     load_templates,
     resolve_entry_placeholders,
 )
-from ui.editor.columns import weight_items, width_items
-from ui.editor.delegates import CheckBoxDelegate, ComboDelegate, ReadOnlyDelegate, TextDelegate
-from ui.editor.model import FontTableModel
+from ui.editor.columns import width_items
+from ui.editor.delegates import (
+    CheckBoxDelegate,
+    ComboDelegate,
+    ReadOnlyDelegate,
+    SaveLangDelegate,
+    SpinDelegate,
+    TextDelegate,
+)
+from ui.editor.model import FontTreeModel
 from ui.editor.preview import FontPreviewWidget
-from ui.editor.table import FontTableView
+from ui.editor.table import FontTreeTableView
 from ui.editor.worker import LoadWorker, SaveWorker
 from ui.signals import app_signals
 
@@ -43,8 +50,8 @@ class EditorFrame(QFrame):
         super().__init__(parent=parent)
         self.setObjectName("EditorFrame")
 
-        self.model = FontTableModel(self)
-        self.table = FontTableView(self.model, self)
+        self.model = FontTreeModel(self)
+        self.table = FontTreeTableView(self.model, self)
         self.preview = FontPreviewWidget(self)
         self._setup_delegates()
 
@@ -99,7 +106,7 @@ class EditorFrame(QFrame):
         for lang in LANGS:
             btn = ToggleButton(LANG_PREFIX[lang], self)
             btn.setChecked(True)
-            btn.toggled.connect(lambda checked, l=lang: self.table.set_language_visible(l, checked))
+            btn.toggled.connect(lambda checked, l=lang: self.table.set_language_row_visible(l, checked))
             self.lang_toggles[lang] = btn
 
         self.switch_extra = SwitchButton("全部字段 关", self)
@@ -119,7 +126,23 @@ class EditorFrame(QFrame):
         self.controls_row.addSpacing(16)
         self.controls_row.addWidget(self.switch_extra)
         self.controls_row.addWidget(self.switch_preview)
+        # 字体预览开关后：全部折叠 / 全部展开（折叠指示器已移出首列，靠这里整体控制）
+        # 与第 1 行 CommandBar（导入/解析…）同款 CommandButton：图标 + 文字
+        self.btn_collapse = self._make_command_button(FIF.UP, "全部折叠")
+        self.btn_collapse.clicked.connect(self.table.collapse_all)
+        self.btn_expand = self._make_command_button(FIF.DOWN, "全部展开")
+        self.btn_expand.clicked.connect(self.table.expand_all)
+        self.controls_row.addSpacing(8)
+        self.controls_row.addWidget(self.btn_collapse)
+        self.controls_row.addWidget(self.btn_expand)
         self.controls_row.addStretch(1)
+
+    def _make_command_button(self, icon, text: str):
+        """与第 1 行 CommandBar 同款的 CommandButton：图标 + 文字，不可勾选（瞬时动作）。"""
+        btn = CommandButton(icon, self)
+        btn.setText(text)
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        return btn
 
     def _build_layout(self):
         self.splitter = QSplitter(Qt.Orientation.Vertical, self)
@@ -192,13 +215,16 @@ class EditorFrame(QFrame):
         for i, col in enumerate(self.model.columns):
             kind = col.kind
             if kind == "weight":
-                self.table.setItemDelegateForColumn(i, ComboDelegate(weight_items(), self.table))
+                # 字重 1-1000 数值直编（spinbox），不再用固定档位下拉
+                self.table.setItemDelegateForColumn(i, SpinDelegate(self.table))
             elif kind == "width":
-                self.table.setItemDelegateForColumn(i, ComboDelegate(width_items(), self.table))
+                # 字宽列纯下拉（禁止输入文字，只能从 9 个枚举选择）
+                self.table.setItemDelegateForColumn(i, ComboDelegate(width_items(), self.table, editable=False))
             elif kind == "italic":
                 self.table.setItemDelegateForColumn(i, CheckBoxDelegate(self.table))
             elif kind == "save":
-                self.table.setItemDelegateForColumn(i, CheckBoxDelegate(self.table))
+                # 保存列：复选框 + 语言标签（简/繁/日/英）
+                self.table.setItemDelegateForColumn(i, SaveLangDelegate(self.table))
             elif kind == "text":
                 self.table.setItemDelegateForColumn(i, TextDelegate(self.table))
             else:
@@ -381,17 +407,18 @@ class EditorFrame(QFrame):
             targets = list(entries)
         for e in targets:
             apply_template(e, tmpl)
-        if apply_translations(tmpl):
-            # 捆绑翻译已写入全局：重建下拉委托并刷新表格显示（含 {weight} 等新术语）
-            self.refresh_after_translations()
-        else:
-            self.model.set_entries(entries)
+        self.model.set_entries(entries)  # 刷新表格显示（含新写入的占位符字段，留待「解析」展开）
         self.status_label.setText(f"已应用模板「{tmpl.name}」到 {len(targets)} 个字体")
         app_signals.project_edited.emit()
 
     def _selected_rows(self) -> list[int]:
+        """选中的 index 去重为字体序号（父行或任一子行都命中其字体）。"""
         selection = self.table.selectionModel()
-        return sorted({i.row() for i in selection.selectedIndexes()})
+        return sorted({
+            self.model.font_of(i)
+            for i in selection.selectedIndexes()
+            if i.isValid() and self.model.font_of(i) >= 0
+        })
 
     def _on_parse(self):
         """把选中（无选中则全部）字体的 {} 占位符解析为正常文本，落进表格。
@@ -480,8 +507,8 @@ class EditorFrame(QFrame):
 
         deleted_paths = set(recycled) | set(permanent)
         if deleted_paths:
-            # 只移除「文件确已删除」的行；失败与无关字体行都保留
-            self.model.remove_rows(
+            # 只移除「文件确已删除」的字体；失败与无关字体都保留
+            self.model.remove_fonts(
                 [r for r in range(len(entries)) if entries[r].font_path in deleted_paths]
             )
 
@@ -513,17 +540,19 @@ class EditorFrame(QFrame):
 
     def _on_current_changed(self, current, previous):
         entries = self.model.get_entries()
-        if current.isValid() and 0 <= current.row() < len(entries):
-            self.preview.set_font(entries[current.row()])
+        font_idx = self.model.font_of(current) if current.isValid() else -1
+        if 0 <= font_idx < len(entries):
+            self.preview.set_font(entries[font_idx])
         else:
             self.preview.set_font(None)
 
-    def _on_row_value_changed(self, row: int) -> None:
+    def _on_row_value_changed(self, font_idx: int) -> None:
         """单元格编辑后刷新预览（字重/斜体/宽度变化需立即反映）。"""
         entries = self.model.get_entries()
         current = self.table.currentIndex()
-        if current.isValid() and current.row() == row and 0 <= row < len(entries):
-            self.preview.set_font(entries[row])
+        cur_font = self.model.font_of(current) if current.isValid() else -1
+        if cur_font == font_idx and 0 <= font_idx < len(entries):
+            self.preview.set_font(entries[font_idx])
 
     # ---------------------------------------------------------------- 后台线程
 
@@ -554,8 +583,4 @@ class EditorFrame(QFrame):
 
     def get_entries(self):
         return self.model.get_entries()
-
-    def refresh_after_translations(self):
-        """字重/字宽翻译修改后：重建下拉委托并刷新表格显示。"""
-        self._setup_delegates()
         self.model.set_entries(self.model.get_entries())

@@ -7,7 +7,6 @@ from fontTools.ttLib.tables._n_a_m_e import NameRecord
 
 from core import metadata as _metadata
 from core.models import LANGS, MANAGED_NAME_IDS, FontEntry
-from core.templates import format_name
 
 # 四个逻辑语言 → Windows 主记录组
 WINDOWS_LANG = {
@@ -121,12 +120,9 @@ def build_font_setting(entry: FontEntry) -> dict:
 
         group = WINDOWS_LANG[lang]
         for name_id in MANAGED_NAME_IDS:
-            # 16 一律写入解析后的家族名（含 16←1 回退），否则 prepare_metadata 会因
-            # 首选家族为空而把整组记录删掉
-            value = family if name_id == 16 else entry.names[lang][name_id]
-            if "{" in value:
-                value = format_name(value, entry, lang)
-            setting[(name_id, *group)] = value
+            # 16 一律写入家族名（含 16←1 回退），否则 prepare_metadata 会因首选家族
+            # 为空而把整组记录删掉。占位符不做解析——保存只负责写入，「解析」按钮负责解析。
+            setting[(name_id, *group)] = family if name_id == 16 else entry.names[lang][name_id]
 
         # 镜像到字体中已有的同语言 Mac/Unicode 组（16 不可编码则整组跳过，Windows 记录为准）
         for mirror in MAC_UNICODE_GROUP_LANG:
@@ -135,11 +131,7 @@ def build_font_setting(entry: FontEntry) -> dict:
             if not _encodable(mirror, family):
                 continue
             for name_id in MANAGED_NAME_IDS:
-                value = entry.names[lang][name_id]
-                if name_id == 16:
-                    value = family
-                if "{" in value:
-                    value = format_name(value, entry, lang)
+                value = family if name_id == 16 else entry.names[lang][name_id]
                 if name_id in (16, 17) or _encodable(mirror, value):
                     setting[(name_id, *mirror)] = value
     return setting
