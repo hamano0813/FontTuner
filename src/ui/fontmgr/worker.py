@@ -1,10 +1,10 @@
-"""后台线程：扫描文件夹为字体树、批量安装/卸载用户字体，避免阻塞界面。"""
+"""后台线程：扫描文件夹为字体树、批量安装/卸载用户字体、字幕扫描/替换，避免阻塞界面。"""
 
 import os
 
 from PySide6.QtCore import QThread, Signal
 
-from core import font_io, font_register, userfont
+from core import font_io, font_register, subtitle_font, userfont
 
 
 class ScanWorker(QThread):
@@ -111,3 +111,73 @@ class UserFontWorker(QThread):
             done += 1
             self.progress.emit(done, total)
         self.finished_ok.emit(results)
+
+
+class SubtitleScanWorker(QThread):
+    """后台扫描字幕并收集字体名：目录则先 os.walk 收集 .ass/.ssa 路径，再逐个读+解析。
+
+    纯文件 I/O 与文本处理，不碰任何 Qt 控件；结果经 finished_ok 回到主线程。
+    empty_reason：目录下无 .ass/.ssa 时为提示文案，否则为空串。
+    """
+
+    finished_ok = Signal(object, object, object, str)  # 路径列表, 字体名列表, 读取错误, 无字幕原因
+
+    def __init__(self, root_dir=None, paths=None, parent=None):
+        super().__init__(parent)
+        self._root_dir = root_dir
+        self._paths = list(paths) if paths else []
+
+    def run(self):
+        paths = self._paths
+        if self._root_dir:
+            paths = []
+            for root, _, files in os.walk(self._root_dir):
+                for fn in files:
+                    if fn.lower().endswith((".ass", ".ssa")):
+                        paths.append(os.path.join(root, fn))
+            if not paths:
+                self.finished_ok.emit([], [], [], "所选目录下没有 .ass/.ssa 文件")
+                return
+        fonts: set[str] = set()
+        errors: list[tuple[str, str]] = []
+        for p in paths:
+            try:
+                text, _ = subtitle_font.read_subtitle(p)
+            except (OSError, UnicodeDecodeError) as exc:
+                errors.append((p, str(exc)))
+                continue
+            fonts.update(subtitle_font.extract_font_names(text))
+        self.finished_ok.emit(paths, sorted(fonts), errors, "")
+
+
+class SubtitleApplyWorker(QThread):
+    """后台批量替换并写回字幕：读+替换+写全在主线程外执行，避免大量文件卡界面。"""
+
+    finished_ok = Signal(int, int, object)  # 修改文件数, 替换处数, 错误列表
+
+    def __init__(self, paths, mapping, parent=None):
+        super().__init__(parent)
+        self._paths = list(paths)
+        self._mapping = dict(mapping)
+
+    def run(self):
+        changed = 0
+        total = 0
+        errors: list[tuple[str, str]] = []
+        for p in self._paths:
+            try:
+                text, enc = subtitle_font.read_subtitle(p)
+            except (OSError, UnicodeDecodeError) as exc:
+                errors.append((p, f"读取失败：{exc}"))
+                continue
+            new_text, n = subtitle_font.apply_replacements(text, self._mapping)
+            if n == 0:
+                continue
+            try:
+                subtitle_font.write_subtitle(p, new_text, enc)
+            except (OSError, UnicodeEncodeError) as exc:
+                errors.append((p, f"写入失败：{exc}"))
+                continue
+            changed += 1
+            total += n
+        self.finished_ok.emit(changed, total, errors)

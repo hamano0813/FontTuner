@@ -41,10 +41,16 @@ from qfluentwidgets import (
 from qfluentwidgets.common.smooth_scroll import SmoothMode
 
 from config import option
-from core import font_register, subtitle_font, userfont
+from core import font_register, userfont
 from ui.fontmgr.subtitle_dialog import SubtitleFontDialog
 from ui.fontmgr.userfont_dialog import UserFontManageDialog
-from ui.fontmgr.worker import RegisterWorker, ScanWorker, UserFontWorker
+from ui.fontmgr.worker import (
+    RegisterWorker,
+    ScanWorker,
+    SubtitleApplyWorker,
+    SubtitleScanWorker,
+    UserFontWorker,
+)
 
 
 class FontFoldersCard(FolderListSettingCard):
@@ -87,6 +93,9 @@ class FontManagerFrame(QFrame):
         self._registered: set[str] = set()  # 本会话内由本工具注册过的字体路径
         self._auto_restored = False         # 启动自动恢复只做一次（后续手动重扫不再套用）
         self._userfont_item_map: dict = {}  # 批量安装/卸载时 库路径 -> 树节点，线程返回后回填
+        self._subtitle_worker = None        # 字幕扫描（收集字体名）后台线程
+        self._subtitle_apply_worker = None  # 字幕替换写回后台线程
+        self._subtitle_paths: list[str] = []  # 扫描阶段解析出的字幕路径，供替换阶段复用
 
         self.title = SubtitleLabel("字体管理", self)
         self.hint = CaptionLabel(
@@ -582,7 +591,7 @@ class FontManagerFrame(QFrame):
         if not paths:
             return
         qconfig.set(option.subtitle_dir, os.path.dirname(paths[0]))  # 记住上次选择，下次从这里打开
-        self._run_subtitle_adapt(paths)
+        self._start_subtitle_scan(paths=paths)
 
     def _on_subtitle_adapt_dir(self):
         """字幕字体适配（目录）：递归读取目录下所有 .ass/.ssa 文件。"""
@@ -592,41 +601,47 @@ class FontManagerFrame(QFrame):
         if not dir_:
             return
         qconfig.set(option.subtitle_dir, dir_)  # 记住上次选择，下次从这里打开
-        paths: list[str] = []
-        for root, _, files in os.walk(dir_):
-            for fn in files:
-                if fn.lower().endswith((".ass", ".ssa")):
-                    paths.append(os.path.join(root, fn))
-        if not paths:
-            InfoBar.warning("未找到字幕", f"所选目录下没有 .ass/.ssa 文件：\n{dir_}",
-                            parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
-            return
-        self._run_subtitle_adapt(paths)
+        self._start_subtitle_scan(root_dir=dir_)
 
-    def _run_subtitle_adapt(self, paths: list[str]):
-        """字幕字体适配核心：收集字体名 → 弹窗选替换 → 批量写回。"""
-        # 收集字幕字体名（跨文件去重）
-        ass_fonts: set[str] = set()
-        for p in paths:
-            try:
-                text, _ = subtitle_font.read_subtitle(p)
-            except (OSError, UnicodeDecodeError) as exc:
-                InfoBar.error("读取失败", f"{os.path.basename(p)}：{exc}",
-                              parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
-                continue
-            ass_fonts.update(subtitle_font.extract_font_names(text))
-        if not ass_fonts:
+    def _start_subtitle_scan(self, root_dir=None, paths=None):
+        """后台扫描字幕：目录则先 os.walk 收集路径，再逐个读+提取字体名，避免大量文件卡界面。"""
+        if self._any_worker():
+            return
+        self._subtitle_paths = []
+        worker = SubtitleScanWorker(root_dir, paths, self)
+        self._subtitle_worker = worker
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)
+        self._set_busy(True)
+        self.status_label.setText("正在扫描字幕…")
+        worker.finished_ok.connect(self._on_subtitle_scan_finished)
+        worker.start()
+
+    def _on_subtitle_scan_finished(self, paths, fonts, errors, empty_reason):
+        """扫描完成（主线程）：报错 → 弹替换对话框 → 后台替换写回。"""
+        self._subtitle_worker = None  # 线程已结束；在此清掉，避免被模态对话框阻塞的 finished 延迟
+        self._subtitle_paths = list(paths)
+        self.progress.setVisible(False)
+        self._set_busy(self._any_worker())
+        if empty_reason:
+            InfoBar.warning("未找到字幕", empty_reason, parent=self.window(),
+                            position=InfoBarPosition.TOP, duration=4000)
+            return
+        if errors:
+            first = errors[0]
+            InfoBar.warning("部分字幕读取失败",
+                            f"{len(errors)} 个字幕无法解码，已跳过：{os.path.basename(first[0])}",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=5000)
+        if not fonts:
             InfoBar.warning("未找到字体名", "所选字幕中未解析到任何字体名（无 Style 行或 \\fn 标签）。",
                             parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
             return
-
         library = self._collect_library_font_names()
         if not library:
             InfoBar.warning("字体库为空", "当前没有已加载的字体，无法进行字幕适配。",
                             parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
             return
-
-        dlg = SubtitleFontDialog(sorted(ass_fonts), library, self.window())
+        dlg = SubtitleFontDialog(fonts, library, self.window())
         if not dlg.exec():
             return
         mapping = dlg.result_mapping()
@@ -634,35 +649,39 @@ class FontManagerFrame(QFrame):
             InfoBar.info("未做替换", "未选择任何替换字体，字幕保持不变。",
                          parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
             return
-
         # 自动勾选替换目标字体：独立 .ttf/.otf 直接勾选；TTC/OTC face 命中勾选其母节点；
         # 留空（未替换）的字体不额外勾选任何节点
         self._check_font_nodes_by_name(set(mapping.values()))
+        self._start_subtitle_apply(self._subtitle_paths, mapping)
 
-        # 批量替换并写回原文件
-        changed_files = 0
-        total_repl = 0
-        for p in paths:
-            try:
-                text, enc = subtitle_font.read_subtitle(p)
-            except (OSError, UnicodeDecodeError) as exc:
-                InfoBar.error("读取失败", f"{os.path.basename(p)}：{exc}",
-                              parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
-                continue
-            new_text, n = subtitle_font.apply_replacements(text, mapping)
-            if n == 0:
-                continue
-            try:
-                subtitle_font.write_subtitle(p, new_text, enc)
-            except (OSError, UnicodeEncodeError) as exc:
-                InfoBar.error("写入失败", f"{os.path.basename(p)}：{exc}",
-                              parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
-                continue
-            changed_files += 1
-            total_repl += n
-        if changed_files:
-            InfoBar.success("替换完成", f"共替换 {total_repl} 处字体名，修改 {changed_files} 个文件。",
+    def _start_subtitle_apply(self, paths, mapping):
+        """后台批量替换并写回字幕，避免大量文件写回卡界面。"""
+        if self._subtitle_apply_worker is not None:
+            return
+        worker = SubtitleApplyWorker(paths, mapping, self)
+        self._subtitle_apply_worker = worker
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)
+        self._set_busy(True)
+        self.status_label.setText("正在替换并写回字幕…")
+        worker.finished_ok.connect(self._on_subtitle_apply_finished)
+        worker.start()
+
+    def _on_subtitle_apply_finished(self, changed, total, errors):
+        self._subtitle_apply_worker = None
+        self.progress.setVisible(False)
+        self._set_busy(self._any_worker())
+        if errors:
+            first = errors[0]
+            InfoBar.warning("部分字幕写回失败",
+                            f"{len(errors)} 个文件失败：{os.path.basename(first[0])}（{first[1]}）",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=5000)
+        if changed:
+            InfoBar.success("替换完成", f"共替换 {total} 处字体名，修改 {changed} 个文件。",
                             parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+        elif not errors:
+            InfoBar.info("未做替换", "没有字幕需要修改。", parent=self.window(),
+                         position=InfoBarPosition.TOP, duration=3000)
 
     def _restore_selection(self, paths: set[str]) -> None:
         """把勾选态恢复为 paths（精确匹配，未在保存列表中的一律取消）。
@@ -703,7 +722,7 @@ class FontManagerFrame(QFrame):
         self._start_register(to_register, to_unregister)
 
     def _start_register(self, to_register, to_unregister) -> None:
-        if self._register_worker is not None:
+        if self._any_worker():
             return
         worker = RegisterWorker(to_register, to_unregister, self)
         self._register_worker = worker
@@ -748,7 +767,12 @@ class FontManagerFrame(QFrame):
         self.progress.setVisible(False)
         self.status_label.setText(f"已注册 {len(self._registered)} 个字体（当前会话有效，重启后失效）")
         self._register_worker = None
-        self._set_busy(self._userfont_worker is not None)
+        self._set_busy(self._any_worker())
+
+    def _any_worker(self) -> bool:
+        """是否有任一后台线程在跑（注册/用户字体/字幕扫描/字幕替换），用于防并发与忙态。"""
+        return (self._register_worker is not None or self._userfont_worker is not None
+                or self._subtitle_worker is not None or self._subtitle_apply_worker is not None)
 
     def _set_busy(self, busy: bool) -> None:
         self.tree.setEnabled(not busy)
@@ -756,6 +780,8 @@ class FontManagerFrame(QFrame):
         self.save_sel_button.setEnabled(not busy)
         self.restore_sel_button.setEnabled(not busy)
         self.deselect_button.setEnabled(not busy)
+        self.subtitle_button.setEnabled(not busy)
+        self.subtitle_dir_button.setEnabled(not busy)
 
     def _uncheck_paths(self, paths: set[str]) -> None:
         def walk(item):
@@ -1059,7 +1085,7 @@ class FontManagerFrame(QFrame):
             node = parent
 
     def _start_userfont(self, to_install, to_uninstall) -> None:
-        if self._register_worker is not None or self._userfont_worker is not None:
+        if self._any_worker():
             return
         worker = UserFontWorker(to_install, to_uninstall, self)
         self._userfont_worker = worker
@@ -1113,7 +1139,7 @@ class FontManagerFrame(QFrame):
         self.progress.setVisible(False)
         self._userfont_item_map = {}
         self._userfont_worker = None
-        self._set_busy(self._register_worker is not None)
+        self._set_busy(self._any_worker())
 
     def _item_display_name(self, item, fallback: str) -> str:
         """节点的展示名：Windows 标准字体名（win_name）优先，回退 family / 文件名。"""
