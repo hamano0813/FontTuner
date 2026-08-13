@@ -8,7 +8,7 @@
 
 import os
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -113,9 +113,9 @@ class FontManagerFrame(QFrame):
         # 禁用平滑滚动（NO_SMOOTH），长目录列表滚动更跟手
         self.tree.scrollDelagate.verticalSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
         self.tree.scrollDelagate.horizonSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
-        self.tree.setColumnCount(4)
+        self.tree.setColumnCount(5)
         self.tree.setHeaderLabels(
-            ["字体文件（勾选即注册到 Windows）", "Windows 标准字体名", "字符数", "版本"])
+            ["字体文件（勾选即注册到 Windows）", "Windows 标准字体名", "子家族名", "字符数", "版本"])
         header = self.tree.header()
         header.setStretchLastSection(False)
         # 前三列 Interactive（初始宽度固定、可手动拖动调整），版本列 Stretch 撑满剩余空间。
@@ -170,13 +170,9 @@ class FontManagerFrame(QFrame):
         filter_row = QHBoxLayout()
         filter_row.addWidget(self.filter_edit, 1)  # 撑满可用宽度
         self.subtitle_button = PushButton(FIF.VIDEO, "字幕适配", self)
-        self.subtitle_button.setToolTip("选择 .ass/.ssa 字幕，把其中用到的字体名批量替换为当前字体库中的字体")
-        self.subtitle_button.clicked.connect(self._on_subtitle_adapt)
+        self.subtitle_button.setToolTip("把字幕中用到、且未全局安装的字体名批量替换为当前字体库中的字体")
+        self.subtitle_button.clicked.connect(self._show_subtitle_menu)
         filter_row.addWidget(self.subtitle_button)
-        self.subtitle_dir_button = PushButton(FIF.FOLDER, "字幕文件夹", self)
-        self.subtitle_dir_button.setToolTip("递归读取所选目录下所有 .ass/.ssa 字幕，批量替换字体名")
-        self.subtitle_dir_button.clicked.connect(self._on_subtitle_adapt_dir)
-        filter_row.addWidget(self.subtitle_dir_button)
         self.save_sel_button = PushButton(FIF.SAVE, "保存选中", self)
         self.save_sel_button.setToolTip("把当前勾选的字体保存下来，供以后恢复")
         self.save_sel_button.clicked.connect(self._on_save_selection)
@@ -352,12 +348,14 @@ class FontManagerFrame(QFrame):
 
     def _build_item(self, node: dict) -> QTreeWidgetItem:
         win_name = node.get("win_name") or ""
+        sub_name = node.get("sub_name") or ""  # 与 win_name 同语言的子家族名
         # 字符数/版本：仅字体节点有值，目录节点为空串
         glyphs = node.get("glyphs") or 0
         version = node.get("version") or ""
         item = QTreeWidgetItem(
-            [node["name"], win_name, str(glyphs) if glyphs else "", version])
-        item.setTextAlignment(2, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)  # 字符数右对齐
+            [node["name"], win_name, sub_name,
+             str(glyphs) if glyphs else "", version])
+        item.setTextAlignment(3, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)  # 字符数右对齐
         # 目录用文件夹图标，字体（含 TTC/OTC 与其 face 子节点）用字体图标，便于区分
         is_font = node["is_font"] or node.get("is_font_face")
         item.setIcon(0, FIF.FONT.icon() if is_font else FIF.FOLDER.icon())
@@ -368,6 +366,7 @@ class FontManagerFrame(QFrame):
         item.setData(0, Qt.ItemDataRole.UserRole + 5, node.get("en_name") or "")  # 英文系统名（隐藏匹配词）
         item.setData(0, Qt.ItemDataRole.UserRole + 6, bool(node.get("is_font")))  # 是否字体文件
         item.setData(0, Qt.ItemDataRole.UserRole + 7, node.get("subfamily") or "")  # 子家族（字重），安装到用户时区分同名家族
+        item.setData(0, Qt.ItemDataRole.UserRole + 8, sub_name)  # 本地化子家族名（展示用，与 win_name 同语言）
         installed_user_path = node.get("installed_user_path") or ""
         if node.get("is_font_face"):
             # TTC/OTC 内的 face 子节点：仅展示，不可勾选（只能勾选整个集合文件）
@@ -605,6 +604,18 @@ class FontManagerFrame(QFrame):
         for i in range(item.childCount()):
             self._check_node_by_name(item.child(i), names)
 
+    def _show_subtitle_menu(self):
+        """「字幕适配」下拉菜单：适配文件 / 适配目录。"""
+        menu = RoundMenu(parent=self.subtitle_button)
+        act_file = Action(FIF.VIDEO, "适配文件")
+        act_file.triggered.connect(self._on_subtitle_adapt)
+        menu.addAction(act_file)
+        act_dir = Action(FIF.FOLDER, "适配目录")
+        act_dir.triggered.connect(self._on_subtitle_adapt_dir)
+        menu.addAction(act_dir)
+        menu.exec(self.subtitle_button.mapToGlobal(
+            QPoint(0, self.subtitle_button.height())))
+
     def _on_subtitle_adapt(self):
         """字幕字体适配：选 .ass/.ssa 文件，把用到的字体名批量替换为当前字体库中的字体。"""
         paths, _ = QFileDialog.getOpenFileNames(
@@ -804,7 +815,6 @@ class FontManagerFrame(QFrame):
         self.restore_sel_button.setEnabled(not busy)
         self.deselect_button.setEnabled(not busy)
         self.subtitle_button.setEnabled(not busy)
-        self.subtitle_dir_button.setEnabled(not busy)
 
     def _uncheck_paths(self, paths: set[str]) -> None:
         def walk(item):
