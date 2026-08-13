@@ -98,6 +98,7 @@ class FontManagerFrame(QFrame):
         self._subtitle_apply_worker = None  # 字幕替换写回后台线程
         self._subtitle_paths: list[str] = []  # 扫描阶段解析出的字幕路径，供替换阶段复用
         self._dup_keys: set[tuple[str, str]] = set()  # 检查重复过滤激活时的重复组合集合
+        self._saved_expanded: set[str] = set()  # 打开「检查重复」前已展开的父节点路径，关闭时恢复
 
         self.title = SubtitleLabel("字体管理", self)
         self.hint = CaptionLabel(
@@ -356,7 +357,54 @@ class FontManagerFrame(QFrame):
         return {k for k, c in counts.items() if c >= 2}
 
     def _on_dup_toggled(self, on: bool) -> None:
-        self._apply_filter(self.filter_edit.text())
+        if on:
+            # 记录当前展开态；过滤后隐藏空父节点、展开所有剩余父节点
+            self._saved_expanded = self._snapshot_expanded()
+            self._apply_filter(self.filter_edit.text())
+            self._expand_visible_dirs()
+        else:
+            # 反向：恢复普通过滤（全部显示），并把父节点展开态还原到打开前
+            self._apply_filter(self.filter_edit.text())
+            self._restore_expanded(self._saved_expanded)
+
+    def _snapshot_expanded(self) -> set[str]:
+        """收集当前已展开的目录节点路径（UserRole 存的路径）。"""
+        paths: set[str] = set()
+
+        def walk(item):
+            if item.childCount() > 0 and item.isExpanded():
+                p = item.data(0, Qt.ItemDataRole.UserRole)
+                if p:
+                    paths.add(p)
+            for i in range(item.childCount()):
+                walk(item.child(i))
+
+        for i in range(self.tree.topLevelItemCount()):
+            walk(self.tree.topLevelItem(i))
+        return paths
+
+    def _restore_expanded(self, saved: set[str]) -> None:
+        """按保存的路径集合还原目录节点展开态（其余折叠）。"""
+        def walk(item):
+            if item.childCount() > 0:
+                p = item.data(0, Qt.ItemDataRole.UserRole)
+                item.setExpanded(bool(p and p in saved))
+            for i in range(item.childCount()):
+                walk(item.child(i))
+
+        for i in range(self.tree.topLevelItemCount()):
+            walk(self.tree.topLevelItem(i))
+
+    def _expand_visible_dirs(self) -> None:
+        """展开全部可见（未被过滤隐藏）的目录节点。"""
+        def walk(item):
+            if item.childCount() > 0 and not item.isHidden():
+                item.setExpanded(True)
+            for i in range(item.childCount()):
+                walk(item.child(i))
+
+        for i in range(self.tree.topLevelItemCount()):
+            walk(self.tree.topLevelItem(i))
 
     def _filter_item(self, item, text: str) -> bool:
         """返回该节点是否可见（自身或后代匹配），并递归设置隐藏。
@@ -382,7 +430,9 @@ class FontManagerFrame(QFrame):
             for i in range(item.childCount()):
                 if self._filter_item(item.child(i), text):
                     child_visible = True
-            visible = self_match or child_visible
+            # 重复过滤时：目录只看有无可见子项（空目录即使名字匹配也隐藏）；
+            # 普通过滤时：自身匹配或任一子项匹配都可见
+            visible = child_visible if self._dup_keys else (self_match or child_visible)
         else:
             visible = self_match
         item.setHidden(not visible)
