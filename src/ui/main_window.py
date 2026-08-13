@@ -66,6 +66,15 @@ class MainWindow(MSFluentWindow):
 
         self.splash.finish()
 
+        # 启动画面结束 → 扩展窗口高度至 960（像 SRW：splash 阶段 720 打底，结束后增高）。
+        # 高度不低于屏幕可用高度（留 20px 余量），避免小屏窗口超出屏幕。
+        height = 960
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            height = min(height, screen.availableGeometry().height() - 20)
+        self.resize(1440, height)
+        self._center_on_screen()
+
         # 常驻托盘图标：关闭窗口只最小化到托盘，托盘菜单「退出」才真正退出
         self.tray = TrayIcon(self)
 

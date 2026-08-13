@@ -3,7 +3,7 @@
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QSplitter, QVBoxLayout
+from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QVBoxLayout
 from qfluentwidgets import (
     Action,
     CommandBar,
@@ -15,7 +15,6 @@ from qfluentwidgets import (
     RoundMenu,
     SwitchButton,
     ToggleButton,
-    isDarkTheme,
     qconfig,
 )
 from qfluentwidgets.components.widgets.command_bar import CommandButton
@@ -145,13 +144,9 @@ class EditorFrame(QFrame):
         return btn
 
     def _build_layout(self):
-        self.splitter = QSplitter(Qt.Orientation.Vertical, self)
-        self.splitter.addWidget(self.table)
-        self.splitter.addWidget(self.preview)
-        self.splitter.setStretchFactor(0, 1)
-        self.splitter.setSizes([480, 200])
-        self.splitter.setChildrenCollapsible(False)  # 拖到尽头不会把预览/表格折叠没了
-        self._style_splitter()
+        # 表格占满剩余高度，预览固定在下部；与字体管理页一致：无分隔框，
+        # 高度由页面布局自行管理（预览开关隐藏/显示预览区，表格自动补位）
+        self.preview.setMinimumHeight(60)
 
         # 顶部单行：功能按钮（CommandBar）+ 语言/字段开关（预览文字已移入设置页，两行合并为一行）
         top = QHBoxLayout()
@@ -170,7 +165,8 @@ class EditorFrame(QFrame):
 
         layout = QVBoxLayout(self)
         layout.addLayout(top)
-        layout.addWidget(self.splitter, 1)
+        layout.addWidget(self.table, 1)
+        layout.addWidget(self.preview)
         layout.addLayout(status_bar)
         self.setLayout(layout)
 
@@ -178,32 +174,6 @@ class EditorFrame(QFrame):
         from qfluentwidgets import CaptionLabel
         label = CaptionLabel("尚未导入字体", self)
         return label
-
-    def _style_splitter(self) -> None:
-        """把表格/预览分割手柄做成发丝线：中间 1px、两侧透明（保留拖拽热区）、悬停加深。
-
-        qfw 无 Splitter 控件，这里直接 setStyleSheet 覆盖原生手柄的默认凸边/把手。
-        qfw 的 setCustomStyleSheet 依赖 styleSheetManager 注册，对未注册的 splitter 不生效，
-        所以用普通 setStyleSheet + 主题切换时由 reset_style() 重刷亮/暗配色。
-        """
-        if isDarkTheme():
-            self.splitter.setStyleSheet(self._handle_qss(255, 255, 255, 0.10, 0.22))
-        else:
-            self.splitter.setStyleSheet(self._handle_qss(0, 0, 0, 0.10, 0.22))
-
-    @staticmethod
-    def _handle_qss(r: int, g: int, b: int, alpha: float, hover_alpha: float) -> str:
-        """生成手柄 QSS：6px 热区内垂直居中一条 1px 发丝线，hover 时加深。"""
-        line = f"rgba({r},{g},{b},{alpha})"
-        hline = f"rgba({r},{g},{b},{hover_alpha})"
-        grad = (f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-                f"stop:0 transparent, stop:0.48 {line}, stop:0.52 {line}, stop:1 transparent)")
-        hgrad = (f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-                 f"stop:0 transparent, stop:0.48 {hline}, stop:0.52 {hline}, stop:1 transparent)")
-        return (
-            f"QSplitter::handle:vertical {{ height: 6px; background: {grad}; }}"
-            f"QSplitter::handle:vertical:hover {{ background: {hgrad}; }}"
-        )
 
     def _on_switch_extra_changed(self, on: bool) -> None:
         self.table.set_extra_fields_visible(on)
@@ -533,7 +503,6 @@ class EditorFrame(QFrame):
         self.table._init_style()
         self._setup_delegates()          # 重建委托（CellComboBox 构造时按 isDarkTheme 上色）
         self.table.viewport().update()   # 强制重绘（chip/文字颜色在绘制时取 isDarkTheme）
-        self._style_splitter()           # 分割手柄亮/暗配色
         self.preview.refresh_theme()     # 预览 label 文字颜色跟随主题
 
     # ---------------------------------------------------------------- 预览

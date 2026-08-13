@@ -2,11 +2,13 @@
 
 模板 = 各语言 name 字段（按语言 Tab 编辑）+ 共享横排四语言的
 字重/字宽/斜体映射表（解析 {weight_sc}/{width_sc}/{italic_sc} 时按「模板」列查表取文本）。
+映射表用 qfw TableView（去 HeaderCardWidget 包裹，改分区标题直接排版）。
 """
 
 from copy import deepcopy
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -14,18 +16,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QListWidgetItem,
-    QSpinBox,
     QStackedWidget,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 from qfluentwidgets import (
     BodyLabel,
-    CaptionLabel,
     FluentIcon as FIF,
-    HeaderCardWidget,
     LineEdit,
     ListWidget,
     MessageBoxBase,
@@ -34,16 +31,22 @@ from qfluentwidgets import (
     ScrollArea,
     SegmentedWidget,
     SubtitleLabel,
+    TableView,
     ToolTipFilter,
     ToolTipPosition,
 )
+from qfluentwidgets.components.widgets.table_view import TableItemDelegate
 
-from core.constants import WIDTH_LABELS
+from core.constants import WIDTH_LABELS, WIDTH_NAMES_EN, WEIGHT_TRANSLATIONS
 from core.font_service import rename_placeholder_help
 from core.models import LANG_LABELS, LANGS, NAME_ID_LABELS
 from core.templates import TEMPLATE_NAME_IDS, VendorTemplate, load_templates, save_templates
+from ui.editor.editors import CellLineEdit, CellSpinBox
 
 _TEMPLATE_FIELDS = [(nid, NAME_ID_LABELS[nid]) for nid in TEMPLATE_NAME_IDS]
+
+# 导航页签文本：翻译页 + 四语言字段页
+_LANG_TAB_TEXTS = {"SC": "简体字段", "TC": "繁体字段", "JA": "日文字段", "EN": "英文字段"}
 
 # 占位符说明（tooltip 文案），安装到每个字段输入框
 _PLACEHOLDER_HINT = (
@@ -84,95 +87,265 @@ class _LangFieldTab(ScrollArea):
 
         self.setWidget(content)
         self.setWidgetResizable(True)
-        self.setMaximumHeight(320)  # 内容多时也不让对话框过高，内部滚动
-        self.enableTransparentBackground()
+        self.enableTransparentBackground()  # 高度随页签容器（翻译页签更高）自适应，内部滚动
 
 
-class _MapTable(QTableWidget):
-    """横排四语言映射表：列0=值（字重用可编辑 spinbox、字宽/斜体用固定文本），列1-4=简繁日英。
+# ---------------------------------------------------------------- 映射表委托
 
-    value_editable=True：字重动态行，带加行/删行；
-    value_editable=False：字宽/斜体固定行。
+class _MapItemDelegate(TableItemDelegate):
+    """映射表委托基类：绘制前把视图默认委托的悬浮/按压/选中行状态同步过来。
+
+    qfw 只把 hover/selected 状态写到默认 delegate 实例，按列挂的自定义
+    delegate 收不到，需在 paint 前同步，否则该列悬浮/选中背景不显示。
     """
 
-    def __init__(self, value_editable: bool, value_text=None, parent=None):
+    def paint(self, painter, option, index):
+        default = self.parent().delegate
+        self.hoverRow = default.hoverRow
+        self.pressedRow = default.pressedRow
+        self.selectedRows = set(default.selectedRows)
+        super().paint(painter, option, index)
+
+
+class _MapValueDelegate(_MapItemDelegate):
+    """值列委托：字重列用 CellSpinBox（左右箭头步进），字宽/斜体列只读。"""
+
+    def __init__(self, parent, editable: bool):
         super().__init__(parent)
-        self._value_editable = value_editable
-        self._values: list[object] = []  # 每行真实值（字重 int / 字宽 int / 斜体 bool）
-        self._value_text = value_text or (lambda v: str(v))
-        self.setColumnCount(5)
-        self.setHorizontalHeaderLabels(
-            ["字重值" if value_editable else "设计值"] + [LANG_LABELS[l] for l in LANGS]
-        )
+        self._editable = editable
+
+    def createEditor(self, parent, option, index):
+        if not self._editable:
+            return None
+        return CellSpinBox(parent, 1, 1000)
+
+    def setEditorData(self, editor, index):
+        editor.set_value(index.data(Qt.ItemDataRole.UserRole))
+        alignment = index.data(Qt.ItemDataRole.TextAlignmentRole)
+        if alignment is not None:
+            editor.apply_alignment(alignment)
+
+    def setModelData(self, editor, model, index):
+        value = editor.get_value()
+        model.setData(index, value, Qt.ItemDataRole.UserRole)
+        model.setData(index, str(value), Qt.ItemDataRole.DisplayRole)
+
+
+class _MapTextDelegate(_MapItemDelegate):
+    """语言文本列委托：项目自带透明编辑器（无边框/无右键菜单/随主题变色）。"""
+
+    def createEditor(self, parent, option, index):
+        return CellLineEdit(parent)
+
+    def setEditorData(self, editor, index):
+        editor.set_value(index.data(Qt.ItemDataRole.DisplayRole))
+        alignment = index.data(Qt.ItemDataRole.TextAlignmentRole)
+        if alignment is not None:
+            editor.apply_alignment(alignment)
+
+    def setModelData(self, editor, model, index):
+        text = editor.get_value()
+        model.setData(index, text, Qt.ItemDataRole.DisplayRole)
+        model.setData(index, text, Qt.ItemDataRole.EditRole)
+
+
+# ---------------------------------------------------------------- 映射表
+
+class _MapTableView(TableView):
+    """映射表基类：列0=值，列1-4=简繁日英；qfw 行背景、紧凑行高、按内容定高。"""
+
+    def __init__(self, value_editable: bool, parent=None):
+        super().__init__(parent)
         self.verticalHeader().setVisible(False)
-        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.verticalHeader().setDefaultSectionSize(28)
+        self.setWordWrap(False)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.setShowGrid(False)
-        self.setWordWrap(False)
-        self.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.setItemDelegateForColumn(0, _MapValueDelegate(self, value_editable))
         for c in range(1, 5):
-            self.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
+            self.setItemDelegateForColumn(c, _MapTextDelegate(self))
+
+    def _configure_columns(self) -> None:
+        """列宽策略：五列等宽拉伸填满表宽。
+
+        必须在 setModel 之后调用——QTableView.setModel 会重置表头
+        各列为 Interactive，在此之前设置的 Stretch 会被清掉。
+        """
+        header = self.horizontalHeader()
+        for c in range(5):
+            header.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
+
+    def sizeHint(self) -> QSize:
+        """按当前行数返回高度（QTableView 默认 256×192 不含行数，布局据此放置全部行）。"""
+        model = getattr(self, "_model", None)
+        if model is None:
+            return super().sizeHint()
+        h = (self.verticalHeader().defaultSectionSize() * max(1, model.rowCount())
+             + self.horizontalHeader().height())
+        return QSize(400, h)
+
+
+class _MapTable(_MapTableView):
+    """字重映射表（动态行）：列0=字重值可编辑 spinbox，加行/删行由对话框按钮驱动。"""
+
+    def __init__(self, parent=None):
+        super().__init__(True, parent)
+        self._model = QStandardItemModel(0, 5, self)
+        self._model.setHorizontalHeaderLabels(["字重值"] + [LANG_LABELS[l] for l in LANGS])
+        self.setModel(self._model)
+        self._configure_columns()
+
+    def _insert_row(self, value, labels: dict[str, str]) -> None:
+        r = self._model.rowCount()
+        self._model.insertRow(r)
+        value_item = QStandardItem(str(value))
+        value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        value_item.setEditable(True)
+        value_item.setData(value, Qt.ItemDataRole.UserRole)
+        self._model.setItem(r, 0, value_item)
+        for c, lang in enumerate(LANGS, start=1):
+            item = QStandardItem(labels.get(lang, ""))
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._model.setItem(r, c, item)
 
     def add_row(self, value, labels: dict[str, str] | None = None) -> None:
-        labels = labels or {}
-        r = self.rowCount()
-        self.insertRow(r)
-        self._values.append(value)
-        if self._value_editable:
-            spin = QSpinBox(self)
-            spin.setRange(1, 1000)
-            spin.setValue(int(value))
-            spin.setFrame(False)
-            spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-            spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.setCellWidget(r, 0, spin)
-        else:
-            item = QTableWidgetItem(self._value_text(value))
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.setItem(r, 0, item)
-        for c, lang in enumerate(LANGS, start=1):
-            edit = LineEdit(self)
-            edit.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
-            edit.setText(labels.get(lang, ""))
-            self.setCellWidget(r, c, edit)
+        self._insert_row(value, labels or {})
+        self._resort()
 
     def remove_row_at(self, index: int) -> None:
-        if 0 <= index < self.rowCount():
-            self.removeRow(index)
-            self._values.pop(index)
+        if 0 <= index < self._model.rowCount():
+            self._model.removeRow(index)
+            self._resort()
+
+    def _resort(self) -> None:
+        """添加/删除字重行后按字重值正序重排：已有 200,400，加 300 → 200,300,400。"""
+        rows = []
+        for r in range(self._model.rowCount()):
+            value_item = self._model.item(r, 0)
+            if value_item is None:
+                continue
+            value = value_item.data(Qt.ItemDataRole.UserRole)
+            labels = {
+                lang: (self._model.item(r, c).text() if self._model.item(r, c) else "")
+                for c, lang in enumerate(LANGS, start=1)
+            }
+            rows.append((value, labels))
+        rows.sort(key=lambda t: t[0])
+        self._model.removeRows(0, self._model.rowCount())
+        for value, labels in rows:
+            self._insert_row(value, labels)
 
     def clear_rows(self) -> None:
-        while self.rowCount():
-            self.removeRow(0)
-        self._values.clear()
+        self._model.removeRows(0, self._model.rowCount())
 
     def rows(self) -> dict:
-        """收集 {真实值: {语言: 文本}}，仅含至少一个非空文本的行。"""
+        """收集 {字重值: {语言: 文本}}，仅含至少一个非空文本的行。"""
         out: dict = {}
-        for r in range(self.rowCount()):
-            value = self._values[r]
-            if self._value_editable:
-                spin = self.cellWidget(r, 0)
-                if spin is not None:
-                    value = spin.value()
+        for r in range(self._model.rowCount()):
+            value_item = self._model.item(r, 0)
+            if value_item is None:
+                continue
+            value = value_item.data(Qt.ItemDataRole.UserRole)
             labels: dict[str, str] = {}
             for c, lang in enumerate(LANGS, start=1):
-                edit = self.cellWidget(r, c)
-                text = edit.text().strip() if edit else ""
+                item = self._model.item(r, c)
+                text = item.text().strip() if item else ""
                 if text:
                     labels[lang] = text
             if labels:
                 out[value] = labels
         return out
 
+    def rowCount(self) -> int:
+        return self._model.rowCount()
 
-_WIDTH_VALUE_TEXT = lambda v: f"{v} · {WIDTH_LABELS.get(v, str(v))}"
+    def setCurrentCell(self, row: int, column: int) -> None:
+        idx = self._model.index(row, column)
+        if idx.isValid():
+            self.setCurrentIndex(idx)
+
+    def currentRow(self) -> int:
+        return self.currentIndex().row()
+
+
+class _WidthFlagTable(_MapTableView):
+    """字宽 & FLAG 映射表（固定行）：9 档字宽 + 斜体一行。
+
+    设计值列只读显示英文枚举（UltraCondensed…UltraExpanded / Italic）；
+    语言列填各语言翻译。斜体只需 Italic 一行——非斜体无需翻译，
+    将来可扩展 fsSelection 的其他位（Bold 等）。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(False, parent)
+        self._model = QStandardItemModel(0, 5, self)
+        self._model.setHorizontalHeaderLabels(["设计值"] + [LANG_LABELS[l] for l in LANGS])
+        self.setModel(self._model)
+        self._configure_columns()
+
+    # ---- 行操作（固定 9+1 行）----
+
+    def _insert_row(self, display: str, key) -> None:
+        r = self._model.rowCount()
+        self._model.insertRow(r)
+        value_item = QStandardItem(display)
+        value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        value_item.setEditable(False)
+        value_item.setData(key, Qt.ItemDataRole.UserRole)
+        self._model.setItem(r, 0, value_item)
+        for c in range(1, 5):
+            item = QStandardItem("")
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._model.setItem(r, c, item)
+
+    def _fill_lang(self, r: int, labels: dict[str, str]) -> None:
+        for c, lang in enumerate(LANGS, start=1):
+            item = self._model.item(r, c)
+            item.setText(labels.get(lang, ""))
+
+    def clear_rows(self) -> None:
+        self._model.removeRows(0, self._model.rowCount())
+
+    def set_widths(self, width_map: dict, italic_map: dict, prefill_italic: bool = True) -> None:
+        """装载：9 档字宽（SC 缺省填简体枚举）+ 斜体一行（新建模板时 SC 缺省「斜体」）。"""
+        self.clear_rows()
+        for v in sorted(WIDTH_LABELS):
+            labels = dict(width_map.get(v, {}))
+            labels.setdefault("SC", WIDTH_LABELS[v])
+            self._insert_row(WIDTH_NAMES_EN.get(v, str(v)), ("width", v))
+            self._fill_lang(self._model.rowCount() - 1, labels)
+        labels = dict(italic_map.get(True, {}))
+        if prefill_italic:
+            labels.setdefault("SC", "斜体")
+        self._insert_row("Italic", ("italic", True))
+        self._fill_lang(self._model.rowCount() - 1, labels)
+
+    def rows(self) -> tuple[dict[int, dict[str, str]], dict[bool, dict[str, str]]]:
+        """收集 (width_map, italic_map)，仅含至少一个非空文本的行。"""
+        width_map: dict[int, dict[str, str]] = {}
+        italic_map: dict[bool, dict[str, str]] = {}
+        for r in range(self._model.rowCount()):
+            key_item = self._model.item(r, 0)
+            if key_item is None:
+                continue
+            kind, value = key_item.data(Qt.ItemDataRole.UserRole)
+            labels: dict[str, str] = {}
+            for c, lang in enumerate(LANGS, start=1):
+                item = self._model.item(r, c)
+                text = item.text().strip() if item else ""
+                if text:
+                    labels[lang] = text
+            if not labels:
+                continue
+            if kind == "width":
+                width_map[value] = labels
+            else:
+                italic_map[value] = labels
+        return width_map, italic_map
 
 
 class TemplateDialog(MessageBoxBase):
-    """新建/编辑模板表单：name 字段按语言 Tab + 共享横排四语言的字重/字宽/斜体映射表。"""
+    """新建/编辑模板表单：name 字段按语言 Tab + 共享横排四语言映射表（qfw TableView，去卡片化）。"""
 
     def __init__(self, parent=None, template: VendorTemplate | None = None):
         super().__init__(parent)
@@ -181,19 +354,6 @@ class TemplateDialog(MessageBoxBase):
         self.title_label = SubtitleLabel("新建模板" if template is None else "编辑模板", self)
         self.name_edit = LineEdit(self)
         self.name_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)  # 输入框禁用右键菜单
-
-        # ---- 语言页签：name 字段 ----
-        self.segmented = SegmentedWidget(self)
-        self.stack = QStackedWidget(self)
-        self.lang_tabs: dict[str, _LangFieldTab] = {}
-        for lang in LANGS:
-            tab = _LangFieldTab(lang, self)
-            self.lang_tabs[lang] = tab
-            self.stack.addWidget(tab)
-            self.segmented.addItem(
-                tab.objectName(), LANG_LABELS[lang],
-                onClick=lambda checked=False, w=tab: self.stack.setCurrentWidget(w),
-            )
 
         # ---- 名称 / 重命名模板 ----
         meta_grid = QGridLayout()
@@ -214,58 +374,63 @@ class TemplateDialog(MessageBoxBase):
         meta_grid.addWidget(self.rename_edit, 1, 1)
         meta_grid.setColumnStretch(1, 1)
 
-        # ---- 共享横排四语言映射表 ----
-        self.weight_table = _MapTable(True, parent=self)
-        self.weight_table.setMaximumHeight(150)
+        # ---- 映射表（置于「翻译」页签，整宽排版：字宽&FLAG 在上、字重在下）----
+        self.weight_table = _MapTable(self)
+        self.weight_table.setMaximumHeight(150)  # 字重行多时内部滚动，不撑高页签
         self.btn_weight_add = PushButton(FIF.ADD, "加行", self)
         self.btn_weight_del = PushButton(FIF.DELETE, "删行", self)
         self.btn_weight_add.clicked.connect(self._add_weight_row)
         self.btn_weight_del.clicked.connect(self._del_weight_row)
 
-        self.width_table = _MapTable(False, _WIDTH_VALUE_TEXT, self)
-        self.width_table.setMaximumHeight(250)
-        self.italic_table = _MapTable(False, parent=self)
-        self.italic_table.setMaximumHeight(110)
+        self.widthflag_table = _WidthFlagTable(self)
 
-        weight_card = HeaderCardWidget("字重映射表", self)
-        wbar = QHBoxLayout()
-        wbar.addWidget(self.btn_weight_add)
-        wbar.addWidget(self.btn_weight_del)
-        wbar.addStretch(1)
-        weight_card.viewLayout.addLayout(wbar)
-        weight_card.viewLayout.addWidget(self.weight_table)
+        translate_tab = QWidget(self)
+        translate_tab.setObjectName("TranslateTab")
+        t_layout = QVBoxLayout(translate_tab)
+        t_layout.setSpacing(8)
+        t_layout.setContentsMargins(0, 0, 0, 0)
+        t_layout.addWidget(BodyLabel("字宽 & FLAG 映射表", self))
+        t_layout.addWidget(self.widthflag_table)
+        weight_head = QHBoxLayout()
+        weight_head.addWidget(BodyLabel("字重映射表", self))
+        weight_head.addStretch(1)
+        weight_head.addWidget(self.btn_weight_add)
+        weight_head.addWidget(self.btn_weight_del)
+        t_layout.addLayout(weight_head)
+        t_layout.addWidget(self.weight_table)
 
-        width_card = HeaderCardWidget("字宽映射表（9 档固定）", self)
-        width_card.viewLayout.addWidget(self.width_table)
-
-        italic_card = HeaderCardWidget("斜体映射表（2 档固定）", self)
-        italic_card.viewLayout.addWidget(self.italic_table)
-
-        map_grid = QGridLayout()
-        map_grid.setSpacing(12)
-        map_grid.addWidget(weight_card, 0, 0, 1, 2)
-        map_grid.addWidget(width_card, 1, 0)
-        map_grid.addWidget(italic_card, 1, 1)
-        map_grid.setColumnStretch(0, 1)
-        map_grid.setColumnStretch(1, 1)
+        # ---- 导航：文本翻译 | 简体字段 | 繁体字段 | 日文字段 | 英文字段 ----
+        self.segmented = SegmentedWidget(self)
+        self.stack = QStackedWidget(self)
+        self.stack.addWidget(translate_tab)
+        self.segmented.addItem(
+            translate_tab.objectName(), "文本翻译",
+            onClick=lambda checked=False: self.stack.setCurrentWidget(translate_tab),
+        )
+        self.lang_tabs: dict[str, _LangFieldTab] = {}
+        for lang in LANGS:
+            tab = _LangFieldTab(lang, self)
+            self.lang_tabs[lang] = tab
+            self.stack.addWidget(tab)
+            self.segmented.addItem(
+                tab.objectName(), _LANG_TAB_TEXTS[lang],
+                onClick=lambda checked=False, w=tab: self.stack.setCurrentWidget(w),
+            )
 
         self.viewLayout.addWidget(self.title_label)
         self.viewLayout.addLayout(meta_grid)
-        self.viewLayout.addSpacing(8)
         self.viewLayout.addWidget(self.segmented)
         self.viewLayout.addWidget(self.stack)
-        self.viewLayout.addSpacing(8)
-        self.viewLayout.addWidget(BodyLabel("字重 / 字宽 / 斜体映射表（四语言横排）", self))
-        self.viewLayout.addLayout(map_grid)
 
         self.yesButton.setText("保存")
         self.cancelButton.setText("取消")
 
-        self.widget.setMinimumSize(900, 780)
+        self.widget.setMinimumSize(900, 760)
         self._load(template or VendorTemplate(name=""))
 
     def _add_weight_row(self):
-        self.weight_table.add_row(400, {"SC": "常规", "EN": "Regular"})
+        # 默认加行：字重 1、翻译全空（用户自己填；加行后自动按字重正序）
+        self.weight_table.add_row(1, {})
         self.weight_table.setCurrentCell(self.weight_table.rowCount() - 1, 0)
 
     def _del_weight_row(self):
@@ -280,20 +445,19 @@ class TemplateDialog(MessageBoxBase):
             values = template.field_values.get(lang, {})
             for nid, edit in tab.edits.items():
                 edit.setText(values.get(nid, ""))
-        # 字重表
+        # 字重表（新建模板预填 100-900 九档 + 四语言默认翻译，旧模板按原数据装载）
         self.weight_table.clear_rows()
-        for value, labels in sorted(template.weight_map.items()):
-            self.weight_table.add_row(value, labels)
-        # 字宽表（9 行固定；SC 缺省预填写死枚举，其余语言按模板值）
-        self.width_table.clear_rows()
-        for v in sorted(WIDTH_LABELS):
-            labels = dict(template.width_map.get(v, {}))
-            labels.setdefault("SC", WIDTH_LABELS[v])
-            self.width_table.add_row(v, labels)
-        # 斜体表（2 行固定）
-        self.italic_table.clear_rows()
-        for flag in (False, True):
-            self.italic_table.add_row(flag, template.italic_map.get(flag, {}))
+        if self._template is None:
+            for value in sorted(WEIGHT_TRANSLATIONS):
+                self.weight_table.add_row(value, dict(WEIGHT_TRANSLATIONS[value]))
+        else:
+            for value, labels in sorted(template.weight_map.items()):
+                self.weight_table.add_row(value, labels)
+        # 字宽 & FLAG 合并表（9 档字宽 + 斜体一行）
+        self.widthflag_table.set_widths(
+            template.width_map, template.italic_map,
+            prefill_italic=self._template is None,
+        )
 
     def result_template(self) -> VendorTemplate:
         field_values: dict[str, dict[int, str]] = {}
@@ -301,12 +465,13 @@ class TemplateDialog(MessageBoxBase):
             values = {nid: edit.text().strip() for nid, edit in tab.edits.items() if edit.text().strip()}
             if values:
                 field_values[lang] = values
+        width_map, italic_map = self.widthflag_table.rows()
         return VendorTemplate(
             name=self.name_edit.text().strip() or "未命名模板",
             field_values=field_values,
             weight_map=self.weight_table.rows(),
-            width_map=self.width_table.rows(),
-            italic_map=self.italic_table.rows(),
+            width_map=width_map,
+            italic_map=italic_map,
             rename_template=self.rename_edit.text().strip(),
         )
 
