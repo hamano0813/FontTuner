@@ -533,6 +533,28 @@ class FontManagerFrame(QFrame):
             self._collect_item_font_names(self.tree.topLevelItem(i), seen)
         return sorted(seen.items())
 
+    def _collect_available_fonts(self, library: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """替换选项池 = 字体库 + 全局已装系统字体（win_name 显示、en_name 关键词）。
+
+        系统字体并入时按显示文本去重（库优先）；family 别名仅在既非显示名也非英文名
+        （未被关键词覆盖）时补一项，避免中英文名对应同一字体的重复选项与「换同名不同
+        写法」的无谓改写。返回 [(显示名, 关键词), …]——字幕写中文名或英文名都能命中。
+        """
+        available = list(library)
+        seen = {win for win, _ in available}
+        for fam, win, en in font_register.system_font_list():
+            display = win or fam
+            if not display:
+                continue
+            keyword = en or fam
+            if display not in seen:
+                available.append((display, keyword))
+                seen.add(display)
+            if fam and fam != display and fam != keyword and fam not in seen:
+                available.append((fam, keyword))
+                seen.add(fam)
+        return available
+
     def _collect_item_font_names(self, item, seen: dict[str, str]) -> None:
         for i in range(item.childCount()):
             child = item.child(i)
@@ -641,7 +663,8 @@ class FontManagerFrame(QFrame):
             InfoBar.warning("字体库为空", "当前没有已加载的字体，无法进行字幕适配。",
                             parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
             return
-        dlg = SubtitleFontDialog(fonts, library, self.window())
+        available = self._collect_available_fonts(library)
+        dlg = SubtitleFontDialog(fonts, available, self.window())
         if not dlg.exec():
             return
         mapping = dlg.result_mapping()

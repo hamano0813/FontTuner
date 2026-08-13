@@ -68,31 +68,36 @@ def _windows_fonts_dir() -> str:
     return os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts")
 
 
-def _registry_font_paths() -> set[str]:
-    """注册表 Fonts 键登记的字体（HKLM + HKCU），统一为 normcase 全路径。
+def _registry_font_paths_for(hive) -> set[str]:
+    """单个注册表 hive 的 Fonts 键登记的字体，统一为 normcase 全路径。
 
     系统字体登记的是相对文件名（实际在 Windows\\Fonts 下）→ 拼出全路径；
     用户安装字体登记的是绝对路径 → 直接用。
     """
     paths: set[str] = set()
     win_fonts = _windows_fonts_dir()
-    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-        try:
-            key = winreg.OpenKey(hive, r"Software\Microsoft\Windows NT\CurrentVersion\Fonts")
-        except OSError:
-            continue
-        try:
-            for i in range(winreg.QueryInfoKey(key)[1]):
-                _, data, _ = winreg.EnumValue(key, i)
-                if not isinstance(data, str) or not data.strip():
-                    continue
-                if os.path.isabs(data):
-                    paths.add(os.path.normcase(data))
-                else:
-                    paths.add(os.path.normcase(os.path.join(win_fonts, data)))
-        finally:
-            key.Close()
+    try:
+        key = winreg.OpenKey(hive, r"Software\Microsoft\Windows NT\CurrentVersion\Fonts")
+    except OSError:
+        return paths
+    try:
+        for i in range(winreg.QueryInfoKey(key)[1]):
+            _, data, _ = winreg.EnumValue(key, i)
+            if not isinstance(data, str) or not data.strip():
+                continue
+            if os.path.isabs(data):
+                paths.add(os.path.normcase(data))
+            else:
+                paths.add(os.path.normcase(os.path.join(win_fonts, data)))
+    finally:
+        key.Close()
     return paths
+
+
+def _registry_font_paths() -> set[str]:
+    """注册表 Fonts 键登记的字体（HKLM + HKCU）。"""
+    return (_registry_font_paths_for(winreg.HKEY_LOCAL_MACHINE)
+            | _registry_font_paths_for(winreg.HKEY_CURRENT_USER))
 
 
 def _windows_fonts_dir_files() -> set[str]:
@@ -102,6 +107,11 @@ def _windows_fonts_dir_files() -> set[str]:
         return {os.path.normcase(os.path.join(win_fonts, name)) for name in os.listdir(win_fonts)}
     except OSError:
         return set()
+
+
+def _system_font_paths() -> set[str]:
+    """全局已装字体文件路径：Windows\\Fonts 目录 + HKLM 注册表登记（不含 HKCU 用户字体）。"""
+    return _windows_fonts_dir_files() | _registry_font_paths_for(winreg.HKEY_LOCAL_MACHINE)
 
 
 _installed_cache: set[str] | None = None
@@ -493,6 +503,50 @@ _COLLECTION_EXTENSIONS = (".ttc", ".otc")
 
 def _is_collection(path: str) -> bool:
     return path.lower().endswith(_COLLECTION_EXTENSIONS)
+
+
+# ---------------------------------------------------------------- 全局已装字体枚举
+
+_system_font_list: list[tuple[str, str, str]] | None = None
+
+
+def system_font_list() -> list[tuple[str, str, str]]:
+    """全局已装字体各 face 的 (family, win_name, en_name)，进程内惰性缓存一次。
+
+    供字幕适配把系统字体并入替换选项：win_name（本地化/中文名）作显示文本，
+    en_name（英文名）作匹配关键词——字幕写「微软雅黑」或「Microsoft YaHei」都能命中。
+    枚举 Windows\\Fonts 目录 + HKLM 注册表登记的文件，逐个直读 name 表（TTC/OTC 取全部
+    face），不写共享字体缓存。.fon 位图字体等读不了 name 表，由 is_supported 排除。
+    """
+    global _system_font_list
+    if _system_font_list is None:
+        out: list[tuple[str, str, str]] = []
+        for path in _system_font_paths():
+            if not font_io.is_supported(path):
+                continue
+            if _is_collection(path):
+                try:
+                    with open(path, "rb") as f:
+                        if f.read(4) != b"ttcf":
+                            continue
+                        f.read(4)  # version
+                        num_faces = struct.unpack(">I", f.read(4))[0]
+                except (OSError, struct.error):
+                    continue
+                for i in range(num_faces):
+                    _append_system_font(_read_name_table(path, i), out)
+            else:
+                _append_system_font(_read_name_table(path), out)
+        _system_font_list = out
+    return _system_font_list
+
+
+def _append_system_font(tup: tuple, out: list) -> None:
+    """把 _read_name_table 结果按 (family, win_name, en_name) strip 后追加；全空则忽略。"""
+    fam, _sub, win, en, _ver, _glyphs = tup
+    fam, win, en = (fam or "").strip(), (win or "").strip(), (en or "").strip()
+    if fam or win or en:
+        out.append((fam, win, en))
 
 
 def _face_node(face: dict, index: int) -> dict:

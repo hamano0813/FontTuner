@@ -128,6 +128,8 @@ class SubtitleScanWorker(QThread):
         self._paths = list(paths) if paths else []
 
     def run(self):
+        # 后台预暖全局已装字体名缓存（首次约 0.1~0.3s），主线程构建适配对话框时直接命中，不卡界面
+        font_register.system_font_list()
         paths = self._paths
         if self._root_dir:
             paths = []

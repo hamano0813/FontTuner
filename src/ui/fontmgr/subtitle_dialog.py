@@ -143,12 +143,25 @@ class SearchableComboBox(QComboBox):
             self.showPopup()  # 输入过滤后自动弹出，高亮首项由用户回车确认
 
     def set_selected(self, text: str) -> None:
-        """预设选中项：仅在完全匹配时选中（否则保持空的第一项）。"""
+        """预设选中项：显示名或英文系统名（关键词）命中即选中，否则保持空的第一项。
+
+        先按显示名忽略大小写匹配，未命中再按英文名（隐藏关键词）匹配——字幕里写
+        中文名或英文名都能对应到同一字体自动预选。
+        """
         if not text:
             return
-        try:
-            idx = next(i for i, (t, _) in enumerate(self._all_items) if t == text)
-        except StopIteration:
+        low = text.casefold()
+        idx = None
+        for i, (t, _kw) in enumerate(self._all_items):
+            if t and t.casefold() == low:
+                idx = i
+                break
+        if idx is None:
+            for i, (_t, kw) in enumerate(self._all_items):
+                if kw and kw.casefold() == low:
+                    idx = i
+                    break
+        if idx is None:
             return
         self.blockSignals(True)
         self.setCurrentIndex(idx)
@@ -274,10 +287,11 @@ class SubtitleFontDialog(MessageBoxBase):
         available = sorted(available_fonts)  # (win_name, en_name)，按显示名排序
 
         self.title_label = SubtitleLabel("字幕字体适配", self)
-        matched = sum(1 for f in subtitle_fonts if f in {t for t, _ in available})
+        matched = sum(1 for f in subtitle_fonts
+                      if any(f.casefold() in (d.casefold(), k.casefold()) for d, k in available))
         self.hint = BodyLabel(
-            f"字幕共用到 {len(subtitle_fonts)} 个字体名：与当前字体库完全匹配的已自动预选，"
-            f"未匹配的默认留空（不替换）。可输入中文名或英文系统名过滤查找。", self)
+            f"字幕共用到 {len(subtitle_fonts)} 个字体名：与当前字体库或系统已装字体匹配的"
+            f"已自动预选，未匹配的默认留空（不替换）。可输入中文名或英文系统名过滤查找。", self)
 
         self.table = _CopyableTable(self)
         # 禁用平滑滚动（NO_SMOOTH），行数多时滚动更跟手
@@ -314,10 +328,21 @@ class SubtitleFontDialog(MessageBoxBase):
         self.cancelButton.setText("取消")
 
     def result_mapping(self) -> dict[str, str]:
-        """返回 旧字体名 -> 新字体名（仅含用户明确选择/输入的非空替换，排除同名）。"""
+        """返回 旧字体名 -> 新字体名（仅含用户明确选择/输入的非空替换）。
+
+        排除「同名（忽略大小写）」与「字幕名 == 所选选项的英文系统名」——后者是自动
+        预选把中文名与英文名对应到同一字体，视为保留原字体，不产生无谓的文件改写。
+        """
         mapping: dict[str, str] = {}
         for name, combo in zip(self.subtitle_fonts, self._combos):
             new = combo.current_text()
-            if new and new != name:
-                mapping[name] = new
+            if not new:
+                continue
+            n = name.casefold()
+            if n == new.casefold():
+                continue
+            kw = next((k for d, k in combo._all_items if d == new), None)
+            if kw and n == kw.casefold():
+                continue
+            mapping[name] = new
         return mapping
