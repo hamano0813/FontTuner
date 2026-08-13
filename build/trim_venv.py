@@ -206,8 +206,12 @@ def trim_venv(venv_dir: str) -> None:
             total += os.path.getsize(path)
             os.remove(path)
 
-    # ── 4) setuptools + pip（纯构建工具，运行时不需要）──
-    for pkg in ("setuptools", "pip", "_distutils_hack"):
+    # ── 4) setuptools + pip + scipy + numpy（纯构建/可选依赖，源码未引用）──
+    # scipy/numpy 由 pyside6-fluent-widgets[full] 的 full extra 带入，仅服务
+    # qfw 的 AcrylicLabel 磨砂与 DominantColor 取色，本程序未用到（壁纸随动是
+    # Windows 原生 Mica/acrylic 背板，不走这两个包），故随 SRW Alpha 一并裁掉。
+    for pkg in ("setuptools", "pip", "_distutils_hack", "scipy", "numpy",
+                "scipy.libs", "numpy.libs"):
         path = os.path.join(site_pkg, pkg)
         if os.path.isdir(path):
             for f in glob.glob(os.path.join(path, "**"), recursive=True):

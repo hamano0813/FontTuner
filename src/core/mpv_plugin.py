@@ -236,7 +236,8 @@ local function parse_ass_fonts(content)
             end
         end
         if line:find("\\fn", 1, true) then
-            for tag in line:gmatch("\\fn([^\\}]+)") do
+            -- 字体名到「,」「\」「}」为止：兼容 {\fnA,\b1}（逗号分隔）与 {\fnA\b1}（反斜杠连写）
+            for tag in line:gmatch("\\fn([^,\\}]+)") do
                 local nm = tag:gsub("^%s+", ""):gsub("%s+$", "")
                 if nm ~= "" then
                     fonts[nm] = true

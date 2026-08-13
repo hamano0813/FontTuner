@@ -63,7 +63,9 @@ def extract_font_names(text: str) -> set[str]:
                     name = _strip_transpose(parts[font_idx].strip())
                     if name:
                         names.add(name)
-    for m in re.finditer(r"\{[^}]*?\\fn([^}\\]+)", text):
+    # \fn 字体名到「,」「\」「}」为止：兼容 {\fnA,\b1}（逗号分隔标签）与 {\fnA\b1}（反斜杠连写），
+    # 避免把 \fn 与后续标签间的分隔逗号收进字体名
+    for m in re.finditer(r"\{[^}]*?\\fn([^,\\}]+)", text):
         name = _strip_transpose(m.group(1).strip())
         if name:
             names.add(name)
@@ -86,7 +88,8 @@ def _replace_fn_tokens(line: str, mapping: dict[str, str]) -> tuple[str, int]:
             return "\\fn" + ("@" if name.startswith("@") else "") + new
         return m.group(0)
 
-    return re.sub(r"\\fn([^}\\]+)", _repl, line), count
+    # 字体名到「,」「\」「}」为止（与 extract_font_names 一致），逗号分隔的后续标签不受影响
+    return re.sub(r"\\fn([^,\\}]+)", _repl, line), count
 
 
 def apply_replacements(text: str, repl: dict[str, str]) -> tuple[str, int]:
