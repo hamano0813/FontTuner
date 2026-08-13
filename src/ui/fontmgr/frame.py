@@ -34,6 +34,7 @@ from qfluentwidgets import (
     RoundMenu,
     SearchLineEdit,
     SubtitleLabel,
+    ToggleButton,
     TreeWidget,
     isDarkTheme,
     qconfig,
@@ -96,6 +97,7 @@ class FontManagerFrame(QFrame):
         self._subtitle_worker = None        # 字幕扫描（收集字体名）后台线程
         self._subtitle_apply_worker = None  # 字幕替换写回后台线程
         self._subtitle_paths: list[str] = []  # 扫描阶段解析出的字幕路径，供替换阶段复用
+        self._dup_keys: set[tuple[str, str]] = set()  # 检查重复过滤激活时的重复组合集合
 
         self.title = SubtitleLabel("字体管理", self)
         self.hint = CaptionLabel(
@@ -118,16 +120,18 @@ class FontManagerFrame(QFrame):
             ["字体文件（勾选即注册到 Windows）", "Windows 标准字体名", "子家族名", "字符数", "版本"])
         header = self.tree.header()
         header.setStretchLastSection(False)
-        # 前三列 Interactive（初始宽度固定、可手动拖动调整），版本列 Stretch 撑满剩余空间。
+        # 前四列 Interactive（初始宽度固定、可手动拖动调整），版本列 Stretch 撑满剩余空间。
         # 不用 ResizeToContents：qfw 树的 sizeHintForColumn 不可靠（算成 30px），
-        # 版本列按内容自适应反而会塌；给前三列显式初始宽 + 版本列撑满才能始终够宽。
+        # 版本列按内容自适应反而会塌；给前四列显式初始宽 + 版本列撑满才能始终够宽。
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         header.resizeSection(0, 400)
         header.resizeSection(1, 320)
-        header.resizeSection(2, 90)
+        header.resizeSection(2, 140)  # 子家族名
+        header.resizeSection(3, 66)   # 字符数（右对齐，值短）
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.currentItemChanged.connect(self._on_current_item_changed)
         # 多选 + 右键菜单：批量安装/取消安装到当前用户（勾选框仍负责会话级注册）
@@ -169,6 +173,12 @@ class FontManagerFrame(QFrame):
         layout.addWidget(self.tree, 1)
         filter_row = QHBoxLayout()
         filter_row.addWidget(self.filter_edit, 1)  # 撑满可用宽度
+        # 检查重复：toggle 只显示「Windows 标准字体名 + 子家族名」组合相同且 ≥2 条的字体
+        self.dup_button = ToggleButton(FIF.COPY, "检查重复", self)
+        self.dup_button.setToolTip("只显示 Windows 标准字体名与子家族名相同的重复字体（相同组合 ≥2 个）；再点一次恢复全部")
+        self.dup_button.setCheckable(True)
+        self.dup_button.toggled.connect(self._on_dup_toggled)
+        filter_row.addWidget(self.dup_button)
         self.subtitle_button = PushButton(FIF.VIDEO, "字幕适配", self)
         self.subtitle_button.setToolTip("把字幕中用到、且未全局安装的字体名批量替换为当前字体库中的字体")
         self.subtitle_button.clicked.connect(self._show_subtitle_menu)
@@ -323,19 +333,51 @@ class FontManagerFrame(QFrame):
     def _apply_filter(self, text: str) -> None:
         """按名称/家族名过滤树：隐藏不匹配节点，目录在无匹配子项时隐藏。"""
         text = (text or "").strip().lower()
+        # 「检查重复」激活时先重算重复组合（树可能已重扫），再叠加到文本过滤
+        self._dup_keys = self._collect_dup_keys() if self.dup_button.isChecked() else set()
         for i in range(self.tree.topLevelItemCount()):
             self._filter_item(self.tree.topLevelItem(i), text)
+
+    def _collect_dup_keys(self) -> set[tuple[str, str]]:
+        """统计树中全部字体条目（字体文件 / TTC 整体）的 (Windows 标准字体名, 子家族名)，
+        返回出现次数 ≥2 的组合集合。TTC 的 face 子项不单独计数，避免与母集合重复。"""
+        counts: dict[tuple[str, str], int] = {}
+
+        def walk(item):
+            if bool(item.data(0, Qt.ItemDataRole.UserRole + 6)):
+                key = (item.text(1), item.text(2))
+                if key[0]:
+                    counts[key] = counts.get(key, 0) + 1
+            for i in range(item.childCount()):
+                walk(item.child(i))
+
+        for i in range(self.tree.topLevelItemCount()):
+            walk(self.tree.topLevelItem(i))
+        return {k for k, c in counts.items() if c >= 2}
+
+    def _on_dup_toggled(self, on: bool) -> None:
+        self._apply_filter(self.filter_edit.text())
 
     def _filter_item(self, item, text: str) -> bool:
         """返回该节点是否可见（自身或后代匹配），并递归设置隐藏。
 
         注意：必须遍历全部子项以逐一 setHidden，不能用 any() 短路。
+        「检查重复」激活时：字体条目（含 TTC 整体）须命中重复组合才可见；
+        TTC 的 face 子项仅展示、跟随父节点可见性，不独立参与过滤。
         """
         self_match = (not text
                       or text in item.text(0).lower()
                       or text in item.text(1).lower()
                       or text in (item.toolTip(0) or "").lower())
-        if item.childCount() > 0:
+        is_font = bool(item.data(0, Qt.ItemDataRole.UserRole + 6))
+        if is_font and self._dup_keys:
+            self_match = self_match and (item.text(1), item.text(2)) in self._dup_keys
+        if is_font:
+            # 字体条目是过滤叶子：其 TTC face 子项只随父显示
+            for i in range(item.childCount()):
+                item.child(i).setHidden(False)
+            visible = self_match
+        elif item.childCount() > 0:
             child_visible = False
             for i in range(item.childCount()):
                 if self._filter_item(item.child(i), text):
