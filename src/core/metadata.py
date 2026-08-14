@@ -173,6 +173,40 @@ def _clean_legacy_names(font: TTFont) -> None:
                 rec.string = stripped
 
 
+# 应用管理的四个 Windows 语言 ID（与 mapping._WINDOWS_LANGID 一致；本模块
+# 不能 import mapping，避免循环依赖）
+_MANAGED_LANGIDS = (0x0804, 0x0404, 0x0411, 0x0409)
+
+
+def _modernize_legacy_cmap(font: TTFont) -> bool:
+    """把旧式 (3,4) cmap 子表现代化为 (3,1) Unicode BMP。
+
+    老字体（如 1999 年 Acer 和平系列）的 (3,4) cmap（Windows encodingID 4 = Big5）
+    键是 Big5 码位而非 Unicode：GDI 渲染时把 '和' 转成 Big5 0xA44D 再查表。GDI 因此
+    把字体当旧式中文档处理——强制要求 (3,4) name 记录存在且家族名含繁体汉字，纯
+    ASCII 名注册失败，Big5 字节在简体系统按 GBK 读还会乱码。这里把 Big5 码位解码
+    重键为 Unicode 码位并改为 platEncID 1，字体按现代 Unicode 处理，ASCII 名可正常
+    显示。返回是否发生转换。
+    """
+    for table in font["cmap"].tables:
+        if table.platformID == 3 and table.platEncID == 4:
+            newmap = {}
+            for cp, gid in table.cmap.items():
+                if cp <= 0xFF:  # ASCII 段在 Unicode 与 Big5 中一致
+                    newmap[cp] = gid
+                    continue
+                try:
+                    ch = bytes((cp >> 8, cp & 0xFF)).decode("big5")
+                except UnicodeDecodeError:
+                    continue  # 无效 Big5 码位原本就是空槽，跳过
+                newmap[ord(ch)] = gid
+            table.platEncID = 1
+            table.language = 0
+            table.cmap = newmap
+            return True
+    return False
+
+
 def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
     """Apply the settings to an already-open font object (does not open or save).
 
@@ -182,9 +216,14 @@ def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
     # remove the records of the unchecked languages
     for platformID, platEncID, langID in remove_groups:
         font["name"].removeNames(platformID=platformID, platEncID=platEncID, langID=langID)
+    # 现代化旧式 (3,4) cmap → (3,1) Unicode；转换后 (3,4) name 记录不再被 GDI 需要，
+    # 删除原本的繁体信息（Big5 字节在简体系统会乱码、纯 ASCII 名会被 GDI 拒绝）
+    if _modernize_legacy_cmap(font):
+        for langID in _MANAGED_LANGIDS:
+            font["name"].removeNames(platformID=3, platEncID=4, langID=langID)
     # adjust the values
     adjust_values(font, font_setting)
-    # 清洗旧式 Windows 组记录的头尾空白（部分老字体 GDI 依赖它们注册）
+    # 清洗旧式 Windows 组记录的头尾空白（(3,10) 等未被删除的旧组）
     _clean_legacy_names(font)
     # prepare the metadata
     langIDs = prepare_metadata(font, font_setting)
