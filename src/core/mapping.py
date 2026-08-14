@@ -86,6 +86,17 @@ def _encodable(group: tuple[int, int, int], value: str) -> bool:
 
 # ---------------------------------------------------------------- 读取
 
+def _format_revision(font: TTFont) -> str:
+    """从 head.fontRevision 生成版本字符串（如 'Version 1.00'）；异常返回空串。"""
+    try:
+        rev = font["head"].fontRevision
+        if rev is None:
+            return ""
+        return f"Version {float(rev):.2f}"
+    except Exception:
+        return ""
+
+
 def read_entry(font_path: str, font_index: int, font: TTFont) -> FontEntry:
     """从已打开的 TTFont 读取一个子字体的逻辑字段。"""
     raw = _metadata.load_metadata(font)
@@ -107,6 +118,13 @@ def read_entry(font_path: str, font_index: int, font: TTFont) -> FontEntry:
             val = raw.get((name_id, *group), "")
             if val and not entry.names[lang][name_id]:
                 entry.names[lang][name_id] = val
+
+    # 版本号兜底：任一语言 nid5 为空时保存用此值（老字体 (3,4) 组被升级删除后，
+    # 版本只留在 Mac 记录里读不到，缺 nid5 会使 Windows 预览回退读 Mac 记录而乱码）
+    entry.version = next(
+        (entry.names[lang][5].strip() for lang in LANGS if entry.names[lang][5].strip()),
+        _format_revision(font),
+    )
 
     # 默认保存勾选 = 该语言有数据
     for lang in LANGS:
@@ -133,6 +151,13 @@ def build_font_setting(entry: FontEntry) -> dict:
         "fsSelection": entry.fs_selection,
         "numGlyphs": entry.num_glyphs,
     }
+    # 版本号回退：某语言 nid 5 为空时，用字体其它语言已有的版本，否则用
+    # head.fontRevision 兜底（老字体 (3,4) 组被删后版本只留在 Mac 记录里读不到，
+    # 缺 nid5 会让 Windows 预览回退读 Mac 记录而乱码）
+    fallback_version = next(
+        (entry.names[lang][5].strip() for lang in LANGS if entry.names[lang][5].strip()),
+        entry.version,
+    )
     for lang in LANGS:
         if not entry.save_langs[lang]:
             continue
@@ -147,7 +172,10 @@ def build_font_setting(entry: FontEntry) -> dict:
         for name_id in MANAGED_NAME_IDS:
             # 16 一律写入家族名（含 16←1 回退），否则 prepare_metadata 会因首选家族
             # 为空而把整组记录删掉。占位符不做解析——保存只负责写入，「解析」按钮负责解析。
-            setting[(name_id, *group)] = family if name_id == 16 else entry.names[lang][name_id]
+            value = family if name_id == 16 else entry.names[lang][name_id]
+            if name_id == 5 and not str(value).strip() and fallback_version:
+                value = fallback_version  # 版本号空 → 用字体已有版本
+            setting[(name_id, *group)] = value
 
         # 镜像到字体中已有的同语言 Mac/Unicode 组（16 不可编码则整组跳过，Windows 记录为准）
         for mirror in MAC_UNICODE_GROUP_LANG:

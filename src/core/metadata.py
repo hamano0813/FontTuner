@@ -271,8 +271,12 @@ def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
         # get the preferred font family and subfamily
         p_family = font_setting.get((16, platformID, platEncID, langID), "")
         s_family = font_setting.get((17, platformID, platEncID, langID), "")
-        # set the normal name when preferred font family and subfamily are not empty
-        if nameID not in (1, 2, 3, 4, 6) and p_family and s_family:
+        # 信息字段（版权/版本/商标/描述等）只要有家族名即写；家族方案字段（16/17/256/
+        # 257 首选/WWS 家族子家族）才需要首选子家族齐全——老字体缺 nid 17 时也要能写入
+        # 版本号(5)，否则 Windows 预览回退读 Mac 记录而乱码
+        if nameID not in (1, 2, 3, 4, 6) and p_family and (
+            s_family or nameID not in (16, 17, 256, 257)
+        ):
             if value:
                 font["name"].setName(value, nameID, platformID, platEncID, langID)
             else:

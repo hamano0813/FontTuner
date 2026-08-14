@@ -42,6 +42,7 @@ class FontEntry:
     us_width_class: int = 5
     fs_selection: int = 64       # int 位掩码；bit0 = 斜体
     num_glyphs: int = 0          # 只读
+    version: str = ""            # 字体版本号（head.fontRevision 兜底），保存时写入各组 nid5
     names: dict[str, dict[int, str]] = field(default_factory=_empty_names)
     save_langs: dict[str, bool] = field(default_factory=lambda: {l: False for l in LANGS})
     temp_names: dict[str, str] = field(default_factory=lambda: {l: "" for l in LANGS})
