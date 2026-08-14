@@ -209,6 +209,11 @@ def _modernize_legacy_cmap(font: TTFont) -> int | None:
                 ch = raw.decode(codec)
             except UnicodeDecodeError:
                 continue  # 无效码位原本就是空槽，跳过
+            # 中文编码（Big5/GBK）的假名区常放错位/占位字形（如 1999 年 Acer 和平系列
+            # 把「こ」画成 5 笔怪形），跳过不映射，让渲染回退到系统字体；日文编码
+            # (cp932) 的假名是正的，保留
+            if codec in ("cp950", "cp936") and 0x3040 <= ord(ch) <= 0x30FF:
+                continue
             newmap[ord(ch)] = gid
         table.platEncID = 1
         table.language = 0
@@ -236,6 +241,24 @@ def _clean_legacy_mac_names(font: TTFont) -> None:
             name.removeNames(rec.nameID, rec.platformID, rec.platEncID, rec.langID)
 
 
+def _strip_legacy_kana(font: TTFont) -> None:
+    """删除旧式中文字体 (3,1) cmap 里的假名映射（U+3040-30FF）。
+
+    1999 年前后的中文字体假名区常放错位/占位字形（如 Acer 和平系列把「こ」画成 5 笔
+    怪形），渲染成乱码符号。删除假名映射后渲染回退到系统字体，日文假名正常显示；
+    汉字映射保留。兼容已转换过（cmap 已是 (3,1)）的字体重存时修正。
+    """
+    for table in font["cmap"].tables:
+        if table.platformID == 3 and table.platEncID == 1:
+            newmap = {
+                cp: gid for cp, gid in table.cmap.items()
+                if not (0x3040 <= cp <= 0x30FF)
+            }
+            if len(newmap) != len(table.cmap):
+                table.cmap = newmap
+            return
+
+
 def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
     """Apply the settings to an already-open font object (does not open or save).
 
@@ -251,6 +274,10 @@ def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
     if legacy_enc is not None:
         for langID in _MANAGED_LANGIDS:
             font["name"].removeNames(platformID=3, platEncID=legacy_enc, langID=langID)
+    # 旧式中文字体（有 Mac (1,2) 中文 cmap）的假名区常放错位字形，删除假名映射让渲染
+    # 回退系统字体——兼容已转换过（cmap 已是 (3,1)）的字体重存时修正
+    if any((t.platformID, t.platEncID) == (1, 2) for t in font["cmap"].tables):
+        _strip_legacy_kana(font)
     # 删除旧式 Mac 中文名字记录（Big5 乱码 / 旧名），无论 cmap 是否已升级都要清
     _clean_legacy_mac_names(font)
     # adjust the values

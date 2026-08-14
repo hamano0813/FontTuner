@@ -80,7 +80,11 @@ class FontPreviewWidget(QWidget):
         fam_id = self._font_ids.pop(path, None)
         if fam_id is not None:
             QFontDatabase.removeApplicationFont(fam_id)
-        self._family_cache.pop(path, None)
+        # 缓存键是 (path, font_index) 元组，用 path 字符串 pop 不到；须按路径清掉全部
+        # ——否则文件重存/解锁后 _family_for 仍命中旧缓存（可能是失败的 None），预览
+        # 一直显示「无法预览」
+        for key in [k for k in self._family_cache if k[0] == path]:
+            del self._family_cache[key]
 
     def refresh_theme(self) -> None:
         """主题切换后重绘预览：label 文字颜色按当前主题刷新。"""
