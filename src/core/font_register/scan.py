@@ -53,8 +53,12 @@ def scan_folder_tree(root: str, errors: list) -> dict | None:
     return node
 
 
-def _face_node(face: dict, index: int) -> dict:
-    """TTC/OTC 内的一个 face 子节点：仅展示，不可勾选（只能勾选整个集合文件）。"""
+def _face_node(parent_path: str, face: dict, index: int) -> dict:
+    """TTC/OTC 内的一个 face 子节点：仅展示，不可勾选（只能勾选整个集合文件）。
+
+    parent_path 为所属集合文件路径、face_index 为该 face 在集合内的序号（与
+    QFontDatabase.applicationFontFamilies / fontNumber 一致），供预览按指定 face 渲染。
+    """
     family = face.get("family") or ""
     subfamily = face.get("subfamily") or ""
     display = f"{family}-{subfamily}" if family and subfamily else (family or subfamily)
@@ -69,6 +73,8 @@ def _face_node(face: dict, index: int) -> dict:
         "glyphs": face.get("glyphs") or 0,
         "is_font": False,
         "is_font_face": True,
+        "face_index": index,
+        "parent_path": parent_path,
         "installed": False,
         "installed_user_path": "",
         "children": [],
@@ -98,7 +104,7 @@ def font_node(path: str) -> dict:
     }
     if font_io.is_collection(path):
         faces = _cached_faces(path)
-        node["children"] = [_face_node(f, i) for i, f in enumerate(faces)]
+        node["children"] = [_face_node(path, f, i) for i, f in enumerate(faces)]
         if faces:
             node["family"] = faces[0]["family"]
             node["subfamily"] = faces[0].get("subfamily") or ""

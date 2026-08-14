@@ -14,7 +14,7 @@ class FontPreviewWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._family_cache: dict[str, str | None] = {}
+        self._family_cache: dict[tuple, str | None] = {}  # (path, font_index) → 家族名
         self._font_ids: dict[str, int] = {}  # 路径 → QFontDatabase 注册 ID，重命名前释放
         self._family: str | None = None
         self._italic = False
@@ -54,9 +54,12 @@ class FontPreviewWidget(QWidget):
         self._weight = 400
 
     def _family_for(self, entry: FontEntry) -> str | None:
+        # 缓存 key 必须含 face 序号：同一 TTC/OTC 的各 face 行路径相同，
+        # 若只按 path 缓存会全部命中第一个 face，预览看不出区别
+        key = (entry.font_path, entry.font_index)
+        if key in self._family_cache:
+            return self._family_cache[key]
         path = entry.font_path
-        if path in self._family_cache:
-            return self._family_cache[path]
         family = None
         fam_id = QFontDatabase.addApplicationFont(path)
         if fam_id != -1:
@@ -69,7 +72,7 @@ class FontPreviewWidget(QWidget):
                 family = next((f for f in families if f == preferred), None)
                 if family is None and families:
                     family = families[0]
-        self._family_cache[path] = family
+        self._family_cache[key] = family
         return family
 
     def release_font(self, path: str) -> None:

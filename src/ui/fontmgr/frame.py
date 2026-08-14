@@ -459,6 +459,8 @@ class FontManagerFrame(QFrame):
         item.setData(0, Qt.ItemDataRole.UserRole + 6, bool(node.get("is_font")))  # 是否字体文件
         item.setData(0, Qt.ItemDataRole.UserRole + 7, node.get("subfamily") or "")  # 子家族（字重），安装到用户时区分同名家族
         item.setData(0, Qt.ItemDataRole.UserRole + 8, sub_name)  # 本地化子家族名（展示用，与 win_name 同语言）
+        item.setData(0, Qt.ItemDataRole.UserRole + 9, node.get("face_index", -1))  # TTC face 序号，非 face 节点为 -1
+        item.setData(0, Qt.ItemDataRole.UserRole + 10, node.get("parent_path") or "")  # 所属集合文件路径（face 子节点预览用）
         installed_user_path = node.get("installed_user_path") or ""
         if node.get("is_font_face"):
             # TTC/OTC 内的 face 子节点：仅展示，不可勾选（只能勾选整个集合文件）
@@ -1306,25 +1308,31 @@ class FontManagerFrame(QFrame):
     # ---------------------------------------------------------------- 底部预览
 
     def _on_current_item_changed(self, current, previous):
-        """选中字体文件时用该字体渲染 4 行预览文字（含 TTC/OTC 整体与已安装到当前用户）。"""
+        """选中字体文件时用该字体渲染预览文字（含 TTC/OTC 整体、face 子节点与已安装到当前用户）。"""
         if current is None:
             self._clear_preview()
             return
-        path = current.data(0, Qt.ItemDataRole.UserRole)
-        installed_path = current.data(0, Qt.ItemDataRole.UserRole + 2)
-        if not path or not current.data(0, Qt.ItemDataRole.UserRole + 6):
-            self._clear_preview()  # 目录与 TTC face 子节点不预览
-            return
-        # 已安装到当前用户的字体读本地副本预览（更快，且库盘（如 RaiDrive）离线也能预览）
-        self._preview_font(installed_path or path)
+        face_index = current.data(0, Qt.ItemDataRole.UserRole + 9)  # TTC face 序号，非 face 为 -1
+        if current.data(0, Qt.ItemDataRole.UserRole + 6):
+            # 字体文件（含 TTC/OTC 整体，或已安装到当前用户）：默认预览第 1 个 face
+            installed_path = current.data(0, Qt.ItemDataRole.UserRole + 2)
+            path = current.data(0, Qt.ItemDataRole.UserRole)
+            # 已安装到当前用户的字体读本地副本预览（更快，且库盘（如 RaiDrive）离线也能预览）
+            self._preview_font(installed_path or path, -1)
+        elif face_index is not None and face_index >= 0:
+            # TTC/OTC 内的 face 子节点：按 face 序号渲染该 face
+            self._preview_font(current.data(0, Qt.ItemDataRole.UserRole + 10), face_index)
+        else:
+            self._clear_preview()  # 目录节点
 
-    def _preview_font(self, path: str) -> None:
+    def _preview_font(self, path: str, face_index: int = -1) -> None:
         """进程内注册字体（QFontDatabase）并取家族名+真实字重，供渲染预览。
 
         同一家族名下的不同字重文件（如 Maple Mono NF CN 的 Bold/Light…）若只用
         家族名建 QFont，Qt 字体引擎会按家族名缓存并钉死在某个 face，连续预览第
         3 次起不再切换。这里按字体二进制的真实 usWeightClass/斜体位（font_style）
         建 QFont，每个文件映射到不同字体配置，稳定命中刚加载的 face。
+        face_index：TTC/OTC 内的 face 序号；-1 表示集合整体（取第 1 个 face）。
         """
         if self._preview_font_id is not None:
             QFontDatabase.removeApplicationFont(self._preview_font_id)
@@ -1336,8 +1344,16 @@ class FontManagerFrame(QFrame):
             return
         self._preview_font_id = fam_id
         families = QFontDatabase.applicationFontFamilies(fam_id)
-        self._preview_family = families[0] if families else None
-        self._preview_weight, self._preview_italic = font_register.font_style(path)
+        if not families:
+            self._preview_family = None
+            self.preview_label.setText("（该字体无法预览）")
+            return
+        if 0 <= face_index < len(families):
+            index = face_index  # TTC 指定 face
+        else:
+            index = 0  # 单字体或集合整体
+        self._preview_family = families[index]
+        self._preview_weight, self._preview_italic = font_register.font_style(path, index)
         self._render_preview()
 
     def _render_preview(self) -> None:
