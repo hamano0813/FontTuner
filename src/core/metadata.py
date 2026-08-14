@@ -122,10 +122,10 @@ def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
         else:
             font["name"].removeNames(2, platformID, platEncID, langID)
         # 3 Unique ID
-        unique_id = font_setting.get((3, platformID, platEncID, langID), "{} {}").format(p_family, s_family, *([""] * 3))
+        unique_id = font_setting.get((3, platformID, platEncID, langID), "{} {}").format(p_family, s_family, *([""] * 3)).strip()
         font["name"].setName(unique_id, 3, platformID, platEncID, langID)
-        # 4 Full Name
-        full_name = f"{p_family} {s_family}"
+        # 4 Full Name（子族名为空时只保留家族名；尾随空格会让 Windows GDI 拒绝注册该字体）
+        full_name = f"{p_family} {s_family}".strip()
         font["name"].setName(full_name, 4, platformID, platEncID, langID)
         # 6 PostScript Name
         # sub loop through all langIDs
@@ -141,6 +141,38 @@ def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
                 break
 
 
+def _clean_legacy_names(font: TTFont) -> None:
+    """清洗旧式 Windows 组（platEncID 4/10）记录的头尾空白。
+
+    写入时新数据一律进 (3,1) 组、旧组不更新；但部分老字体 GDI 依赖旧组注册，
+    历史坏保存可能在旧组留下尾随空格（如 nid 4 的 '和平疊圓 '），使字体无法注册。
+    这里按记录自身编码（big5/cp936/cp932…）解码-去空白-回写，无法解码的原始字节
+    原样保留。
+    """
+    name = font["name"]
+    for rec in list(name.names):
+        if rec.platformID != 3 or rec.platEncID not in (4, 10):
+            continue
+        if isinstance(rec.string, bytes):
+            enc = rec.getEncoding()
+            if not enc:
+                continue
+            try:
+                text = rec.string.decode(enc)
+            except UnicodeDecodeError:
+                continue
+            try:
+                stripped = text.strip().encode(enc)
+            except UnicodeEncodeError:
+                continue
+            if stripped != rec.string:
+                rec.string = stripped
+        else:
+            stripped = rec.string.strip()
+            if stripped != rec.string:
+                rec.string = stripped
+
+
 def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
     """Apply the settings to an already-open font object (does not open or save).
 
@@ -152,6 +184,8 @@ def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
         font["name"].removeNames(platformID=platformID, platEncID=platEncID, langID=langID)
     # adjust the values
     adjust_values(font, font_setting)
+    # 清洗旧式 Windows 组记录的头尾空白（部分老字体 GDI 依赖它们注册）
+    _clean_legacy_names(font)
     # prepare the metadata
     langIDs = prepare_metadata(font, font_setting)
     # fetch the metadata

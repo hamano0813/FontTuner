@@ -50,7 +50,7 @@ wheels = [
 
 [[package]]
 name = "fonttuner"
-version = "2.1.2"
+version = "2.2.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fonttools" },

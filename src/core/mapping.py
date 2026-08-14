@@ -16,7 +16,8 @@ _WINDOWS_LANGID = {
     "EN": 0x0409,
 }
 
-# 默认写入组（platEncID 1 = UCS-2）；老字体用 platEncID 4（UCS-2 旧式）时，写入优先沿用字体已有组
+# 默认写入组（platEncID 1 = UCS-2）：写入一律用新版本 (3,1,langID)，老字体
+# 只有 platEncID 4/10 组也新建 (3,1) 写入；旧组保留供 GDI 与读取兜底
 WINDOWS_LANG = {lang: (3, 1, langid) for lang, langid in _WINDOWS_LANGID.items()}
 
 # 字体中可能存在的非 Windows 记录组 → 逻辑语言（读取 + 保存镜像用）
@@ -59,16 +60,13 @@ def _all_groups_of_lang(lang: str) -> list[tuple[int, int, int]]:
     return groups
 
 
-def _windows_group(raw_groups: set[tuple[int, int, int]], lang: str) -> tuple[int, int, int]:
-    """逻辑语言的写入组：优先用字体中已有的 Windows 组（任意 platEncID），
-    否则回落默认 (3,1,langID)。
+def _windows_group(lang: str) -> tuple[int, int, int]:
+    """逻辑语言的写入组：一律新版本 (3,1,langID)。
 
-    避免为 platEncID=4 的老字体另建 (3,1) 组，造成新旧两组并存、字体内名称不更新。
+    老字体只有 platEncID 4/10 组时也新建 (3,1) 组写入——「写入一定写在新版本上」；
+    旧式 (3,4)/(3,10) 组保留不删（部分老字体 GDI 依赖它们注册），读取时新组优先、
+    旧组兜底，因此保存后新组数据才是权威。
     """
-    langid = _WINDOWS_LANGID[lang]
-    for g in raw_groups:
-        if g[0] == 3 and g[2] == langid:
-            return g
     return WINDOWS_LANG[lang]
 
 
@@ -145,7 +143,7 @@ def build_font_setting(entry: FontEntry) -> dict:
         if not any(entry.names[lang][n].strip() for n in MANAGED_NAME_IDS):
             continue  # 勾选但内容全空 → 不新建
 
-        group = _windows_group(entry._raw_groups, lang)
+        group = _windows_group(lang)
         for name_id in MANAGED_NAME_IDS:
             # 16 一律写入家族名（含 16←1 回退），否则 prepare_metadata 会因首选家族
             # 为空而把整组记录删掉。占位符不做解析——保存只负责写入，「解析」按钮负责解析。
