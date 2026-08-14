@@ -2,7 +2,7 @@
 
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QVBoxLayout
 from qfluentwidgets import (
     Action,
@@ -48,9 +48,16 @@ class EditorFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setObjectName("EditorFrame")
+        # 拖放导入：把字体文件/文件夹从资源管理器拖到本页加入编辑列表。注意必须以
+        # 普通（非管理员）权限运行——管理员权限触发 Windows UIPI，收不到 Explorer
+        # 发起的 OLE 拖放。
+        self.setAcceptDrops(True)
 
         self.model = FontTreeModel(self)
         self.table = FontTreeTableView(self.model, self)
+        # 表格 viewport 单独启用拖放并转发给页面处理（QAbstractScrollArea 会拦截拖放事件）
+        self.table.viewport().setAcceptDrops(True)
+        self.table.viewport().installEventFilter(self)
         self.preview = FontPreviewWidget(self)
         self._setup_delegates()
 
@@ -200,7 +207,63 @@ class EditorFrame(QFrame):
             else:
                 self.table.setItemDelegateForColumn(i, ReadOnlyDelegate(self.table))
 
-    # ---------------------------------------------------------------- 导入
+    # ---------------------------------------------------------------- 拖放导入
+
+    _FONT_SUFFIXES = {".ttf", ".otf", ".ttc", ".otc"}
+
+    def _dropped_font_paths(self, event) -> list[str]:
+        """从拖放事件提取本地字体文件/文件夹路径；非字体或外部路径忽略。"""
+        paths = []
+        mime = event.mimeData()
+        if mime.hasUrls():
+            for url in mime.urls():
+                if not url.isLocalFile():
+                    continue
+                p = url.toLocalFile()
+                if os.path.isdir(p) or os.path.splitext(p)[1].lower() in self._FONT_SUFFIXES:
+                    paths.append(p)
+        return paths
+
+    def _accept_font_drop(self, event) -> bool:
+        """拖入内容含字体文件/文件夹则接受（显示放置光标），否则交给默认处理。"""
+        if self._dropped_font_paths(event):
+            event.acceptProposedAction()
+            return True
+        return False
+
+    def eventFilter(self, obj, event):
+        """表格 viewport 的拖放事件转发给页面处理（滚动区会拦截不往父级传）。"""
+        et = event.type()
+        if obj is self.table.viewport() and et in (
+            QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop,
+        ):
+            if et == QEvent.Type.Drop:
+                self.dropEvent(event)
+            else:
+                self._accept_font_drop(event)
+            return True
+        return super().eventFilter(obj, event)
+
+    def dragEnterEvent(self, event):
+        if not self._accept_font_drop(event):
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if not self._accept_font_drop(event):
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        """把拖入的字体文件/文件夹追加到编辑列表（不清空现有内容）。"""
+        paths = self._dropped_font_paths(event)
+        if not paths:
+            super().dropEvent(event)
+            return
+        if self._worker is not None:
+            InfoBar.warning("正在加载中", "请等待当前导入完成后再次拖放。",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+            return
+        self.import_paths(paths, append=True)
+        event.acceptProposedAction()
 
     def import_paths(self, paths: list[str], append: bool = False):
         """导入字体或文件夹（供文件选择按钮等调用）。
