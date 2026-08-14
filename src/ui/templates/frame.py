@@ -50,10 +50,15 @@ _LANG_TAB_TEXTS = {"SC": "简体字段", "TC": "繁体字段", "JA": "日文字�
 
 # 占位符说明（tooltip 文案），安装到每个字段输入框
 _PLACEHOLDER_HINT = (
-    "字段支持 {weight} {width} {italic} {weight_num} {width_num} "
-    "以及 {name_sc} {name_tc} {name_jp} {name_en}（临时名称）"
-    "{charset_sc} {charset_tc} {charset_jp} {charset_en}（字符集）占位符，"
-    "按字体动态生成；字重/字宽/斜体文本按本模板映射表 + 字体数值查表。"
+    "字段内可填占位符，解析时按字体动态替换：\n"
+    "\n"
+    "· {weight} {width} {italic}   字重/字宽/斜体文本（「文本翻译」页映射表配置）\n"
+    "· {weight_num} {width_num}   字重/字宽数值\n"
+    "· {name_sc} {name_tc} {name_jp} {name_en}   对应语言临时名称\n"
+    "· {charset_sc} {charset_tc} {charset_jp} {charset_en}   对应语言字符集\n"
+    "· {family_xx} {subfamily_xx} {preferred_family_xx} {version_xx}   家族/子家族/首选家族/版本号\n"
+    "\n"
+    "xx 为语言后缀：sc/tc/jp/en（简/繁/日/英）"
 )
 
 

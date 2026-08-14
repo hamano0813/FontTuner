@@ -62,26 +62,15 @@ _FIELD_PRIORITY = ("EN", "SC", "TC", "JA")  # 旧占位符 字重/字宽/版本�
 _LANG_CODE = {"SC": "sc", "TC": "tc", "JA": "jp", "EN": "en"}  # 语言后缀
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
-# 重命名模板变量（中文列名 → 占位符），xx 为语言后缀 sc/tc/jp/en
-RENAME_PLACEHOLDERS = (
-    ("字体名", "{name_xx}"),
-    ("字重", "{weight_xx}"),
-    ("字宽", "{width_xx}"),
-    ("斜体", "{italic_xx}"),
-    ("字符集", "{charset_xx}"),
-    ("家族名", "{family_xx}"),
-    ("子家族名", "{subfamily_xx}"),
-    ("首选家族名", "{preferred_family_xx}"),
-    ("版本号", "{version_xx}"),
-    ("字重数值", "{weight_num}"),
-    ("字宽数值", "{width_num}"),
-)
-
 
 def rename_placeholder_help() -> str:
-    """生成「中文列名 - {占位符}」变量说明，并注明语言后缀。"""
-    lines = "\n".join(f"{cn} - {ph}" for cn, ph in RENAME_PLACEHOLDERS)
-    return lines + "\n\nxx 可替换为四种语言：sc/tc/jp/en（简/繁/日/英）"
+    """重命名模板变量说明：按类别一行分组，注明语言后缀。"""
+    return (
+        "重命名模板支持以下变量（xx = sc/tc/jp/en，简/繁/日/英）：\n"
+        "· 字体名 {name_xx} · 字重 {weight_xx} · 字宽 {width_xx} · 斜体 {italic_xx} · 字符集 {charset_xx}\n"
+        "· 家族名 {family_xx} · 子家族名 {subfamily_xx} · 首选家族名 {preferred_family_xx} · 版本号 {version_xx}\n"
+        "· 字重数值 {weight_num} · 字宽数值 {width_num}"
+    )
 
 
 class _SafeDict(dict):

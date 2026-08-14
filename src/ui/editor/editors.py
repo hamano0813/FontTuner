@@ -109,7 +109,7 @@ class CellComboEditor(QComboBox, CellEditor):
         if isDarkTheme():
             qss = (
                 "QComboBox { border: none; border-radius: 0px; background: transparent; "
-                "color: white; outline: none; }"
+                "color: white; outline: none; padding-left: 10px; }"
                 "QComboBox:hover { border: none; background: transparent; }"
                 "QComboBox:focus { border: none; background: transparent; }"
                 "QComboBox::drop-down { width: 20px; border: none; background: transparent; }"
@@ -136,7 +136,7 @@ class CellComboEditor(QComboBox, CellEditor):
         else:
             qss = (
                 "QComboBox { border: none; border-radius: 0px; background: transparent; "
-                "color: black; outline: none; }"
+                "color: black; outline: none; padding-left: 10px; }"
                 "QComboBox:hover { border: none; background: transparent; }"
                 "QComboBox:focus { border: none; background: transparent; }"
                 "QComboBox::drop-down { width: 20px; border: none; background: transparent; }"

@@ -15,8 +15,8 @@ _DEFAULT_WIDTHS = {
     ("fixed", "renameTemplate"): 220,
     ("fixed", "weight"): 80,
     ("fixed", "width"): 80,
-    ("fixed", "italic"): 70,
-    ("fixed", "numGlyphs"): 66,
+    ("fixed", "italic"): 45,
+    ("fixed", "numGlyphs"): 60,
 }
 
 

@@ -173,6 +173,12 @@ class FontTreeModel(QAbstractItemModel):
             if key[0] == "fixed":
                 return None  # 子行父列空
             lang = LANGS[node - 1]
+        # 字重列数值居中、字形数右对齐（其余列左对齐）
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            if key == ("fixed", "weight"):
+                return Qt.AlignmentFlag.AlignCenter
+            if key == ("fixed", "numGlyphs"):
+                return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         value = self._get_value(entry, key, lang)
         # 保存列：显示语言标签 + 勾选状态
         if key[0] == "save":

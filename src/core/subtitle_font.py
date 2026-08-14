@@ -20,6 +20,20 @@ def _strip_transpose(name: str) -> str:
     return name[1:] if name.startswith("@") else name
 
 
+# 正则元字符：真实字体名不含这些（子集化字体名如「请勿安装…-xxxx」的连字符除外）
+_REGEX_CHARS = set("()[]{}.*+?^$|\\")
+
+
+def _plausible_font_name(name: str) -> bool:
+    """过滤把脚本里的正则/模板串误当字体名的匹配（如 (.+)）。
+
+    \fn 提取是全局扫描，Aegisub 自动化脚本（code once 行）里的 Lua 正则
+    字符串如 "\\\\fn(.+)\\"} 会被误读成字体标签；含正则元字符的名字不可能是
+    真实字体名，直接丢弃，而脚本里真实用到的子集化字体名（连字符等）照常保留。
+    """
+    return not any(ch in _REGEX_CHARS for ch in name)
+
+
 def _section(line: str) -> str | None:
     """若该行为节标题则返回小写节名，否则 None。"""
     s = line.strip()
@@ -64,10 +78,12 @@ def extract_font_names(text: str) -> set[str]:
                     if name:
                         names.add(name)
     # \fn 字体名到「,」「\」「}」为止：兼容 {\fnA,\b1}（逗号分隔标签）与 {\fnA\b1}（反斜杠连写），
-    # 避免把 \fn 与后续标签间的分隔逗号收进字体名
+    # 避免把 \fn 与后续标签间的分隔逗号收进字体名。
+    # 过滤含正则元字符的名字，避免 Aegisub 自动化脚本里的 Lua 正则串（如 \\fn(.+)）
+    # 被误当成字体名。
     for m in re.finditer(r"\{[^}]*?\\fn([^,\\}]+)", text):
         name = _strip_transpose(m.group(1).strip())
-        if name:
+        if name and _plausible_font_name(name):
             names.add(name)
     return names
 

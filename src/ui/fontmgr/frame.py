@@ -118,7 +118,7 @@ class FontManagerFrame(QFrame):
         self.tree.scrollDelagate.horizonSmoothScroll.setSmoothMode(SmoothMode.NO_SMOOTH)
         self.tree.setColumnCount(5)
         self.tree.setHeaderLabels(
-            ["字体文件（勾选即注册到 Windows）", "Windows 标准字体名", "子家族名", "字符数", "版本"])
+            ["字体文件（勾选即注册到 Windows）", "Windows 标准字体名", "子家族名", "字形数", "版本"])
         header = self.tree.header()
         header.setStretchLastSection(False)
         # 前四列 Interactive（初始宽度固定、可手动拖动调整），版本列 Stretch 撑满剩余空间。

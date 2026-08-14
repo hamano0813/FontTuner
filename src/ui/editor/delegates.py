@@ -203,10 +203,19 @@ class ReadOnlyDelegate(BaseCellDelegate):
 
 
 def _centered_checkbox_rect(rect: QRect) -> QRect:
-    indicator = QApplication.style().pixelMetric(QStyle.PixelMetric.PM_IndicatorWidth)
-    x = rect.x() + (rect.width() - indicator) // 2
-    y = rect.y() + (rect.height() - indicator) // 2
-    return QRect(x, y, indicator, indicator)
+    """居中勾选框：以样式实际指示器尺寸（SE_CheckBoxIndicator）为准。
+
+    PM_IndicatorWidth/Height 可能与 CE_CheckBox 实际绘制尺寸不一致（尤其跨平台/样式），
+    用 subElementRect 取真实指示器矩形，再按它的宽高居中，避免勾选框偏移。
+    """
+    opt = QStyleOptionButton()
+    opt.rect = rect
+    ind = QApplication.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, opt)
+    w, h = ind.width(), ind.height()
+    # 居中的基础上整体左移 4px（斜体格勾选框的视觉微调）
+    x = rect.x() + (rect.width() - w) // 2 - 4
+    y = rect.y() + (rect.height() - h) // 2
+    return QRect(x, y, w, h)
 
 
 class CheckBoxDelegate(BaseCellDelegate):
@@ -256,7 +265,7 @@ class SaveLangDelegate(BaseCellDelegate):
         indicator = style.pixelMetric(QStyle.PixelMetric.PM_IndicatorWidth)
         fm = QFontMetrics(getFont(13))
         text_w = fm.horizontalAdvance(text)
-        gap = 4
+        gap = 8
         total = indicator + gap + text_w
         x = rect.x() + (rect.width() - total) // 2
         cy = rect.y() + rect.height() // 2

@@ -22,7 +22,7 @@ class MainWindow(MSFluentWindow):
         ver = read_version()
         self.setWindowTitle("拾字 FontTuner" if not ver else f"拾字 FontTuner v{ver}")
         self.setWindowIcon(QIcon(":/icon.png"))
-        self.resize(1440, 720)
+        self.resize(1600, 960)
         self.setMinimumSize(960, 600)
 
         # 启动画面：qfw SplashScreen 铺满窗口，构建各页面期间常驻
@@ -66,14 +66,8 @@ class MainWindow(MSFluentWindow):
 
         self.splash.finish()
 
-        # 启动画面结束 → 扩展窗口高度至 960（像 SRW：splash 阶段 720 打底，结束后增高）。
-        # 高度不低于屏幕可用高度（留 20px 余量），避免小屏窗口超出屏幕。
-        height = 960
-        screen = QApplication.primaryScreen()
-        if screen is not None:
-            height = min(height, screen.availableGeometry().height() - 20)
-        self.resize(1440, height)
-        self._center_on_screen()
+        # 启动画面结束：窗口保持 1600×960（与 splash 同为 5:3），不再收缩。
+        # 居中已在 show() 后执行（_center_on_screen）。
 
         # 常驻托盘图标：关闭窗口只最小化到托盘，托盘菜单「退出」才真正退出
         self.tray = TrayIcon(self)
