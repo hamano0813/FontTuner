@@ -177,34 +177,63 @@ def _clean_legacy_names(font: TTFont) -> None:
 # 不能 import mapping，避免循环依赖）
 _MANAGED_LANGIDS = (0x0804, 0x0404, 0x0411, 0x0409)
 
+# Windows cmap 旧式非 Unicode 编码 → Python codec（键是各编码的码位字节对）
+_CMAP_LEGACY_CODECS = {
+    2: "cp932",    # ShiftJIS 日文
+    3: "cp936",    # GBK/PRC 简中
+    4: "cp950",    # Big5 繁中
+    5: "cp949",    # Wansung 韩文
+    6: "cp1361",   # Johab 韩文
+}
 
-def _modernize_legacy_cmap(font: TTFont) -> bool:
-    """把旧式 (3,4) cmap 子表现代化为 (3,1) Unicode BMP。
 
-    老字体（如 1999 年 Acer 和平系列）的 (3,4) cmap（Windows encodingID 4 = Big5）
-    键是 Big5 码位而非 Unicode：GDI 渲染时把 '和' 转成 Big5 0xA44D 再查表。GDI 因此
-    把字体当旧式中文档处理——强制要求 (3,4) name 记录存在且家族名含繁体汉字，纯
-    ASCII 名注册失败，Big5 字节在简体系统按 GBK 读还会乱码。这里把 Big5 码位解码
-    重键为 Unicode 码位并改为 platEncID 1，字体按现代 Unicode 处理，ASCII 名可正常
-    显示。返回是否发生转换。
+def _modernize_legacy_cmap(font: TTFont) -> int | None:
+    """把旧式非 Unicode cmap 子表（encodingID 2/3/4/5/6）转成 (3,1) Unicode BMP。
+
+    这些旧编码的 cmap 键是各编码的码位而非 Unicode：GDI 渲染时把 '和' 转成该编码
+    的码位（如 Big5 0xA44D）再查表。Windows GDI 因此把字体当旧式中文档处理——强制
+    要求对应的旧 name 记录存在且家族名含该语言汉字，纯 ASCII 名注册失败，旧编码
+    字节在简体系统按 GBK 读还会乱码。这里把各编码码位解码重键为 Unicode 码位并改为
+    platEncID 1，字体按现代 Unicode 处理，ASCII 名可正常显示。返回被转换的
+    encodingID（无则 None）。
     """
     for table in font["cmap"].tables:
-        if table.platformID == 3 and table.platEncID == 4:
-            newmap = {}
-            for cp, gid in table.cmap.items():
-                if cp <= 0xFF:  # ASCII 段在 Unicode 与 Big5 中一致
-                    newmap[cp] = gid
-                    continue
-                try:
-                    ch = bytes((cp >> 8, cp & 0xFF)).decode("big5")
-                except UnicodeDecodeError:
-                    continue  # 无效 Big5 码位原本就是空槽，跳过
-                newmap[ord(ch)] = gid
-            table.platEncID = 1
-            table.language = 0
-            table.cmap = newmap
-            return True
-    return False
+        codec = _CMAP_LEGACY_CODECS.get(table.platEncID)
+        if table.platformID != 3 or codec is None:
+            continue
+        enc = table.platEncID
+        newmap = {}
+        for cp, gid in table.cmap.items():
+            try:
+                raw = bytes((cp,)) if cp <= 0xFF else bytes((cp >> 8, cp & 0xFF))
+                ch = raw.decode(codec)
+            except UnicodeDecodeError:
+                continue  # 无效码位原本就是空槽，跳过
+            newmap[ord(ch)] = gid
+        table.platEncID = 1
+        table.language = 0
+        table.cmap = newmap
+        return enc
+    return None
+
+
+def _clean_legacy_mac_names(font: TTFont) -> None:
+    """删除旧式 Mac 中文名字记录（langID 0x13 且含非 ASCII 内容）。
+
+    1999 年前后的字体把 Big5 字节塞进 Mac Roman 记录（Mac 预览乱码）或作为旧中文名，
+    Windows 字体预览读这些记录会显示乱码。现代字体的 Mac 记录用 langID 0（英文），
+    不受影响。保留版权/子家族/版本/商标（nid 0/2/5/7）等 ASCII 元数据。
+    """
+    name = font["name"]
+    for rec in list(name.names):
+        if rec.platformID != 1 or rec.langID != 0x13 or rec.nameID not in (1, 3, 4, 6):
+            continue
+        try:
+            has_high = any(ord(c) > 0x7F for c in rec.toUnicode())
+        except UnicodeDecodeError:
+            has_high = True
+        if has_high:
+            name.removeNames(rec.nameID, rec.platformID, rec.platEncID, rec.langID)
 
 
 def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
@@ -216,11 +245,14 @@ def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
     # remove the records of the unchecked languages
     for platformID, platEncID, langID in remove_groups:
         font["name"].removeNames(platformID=platformID, platEncID=platEncID, langID=langID)
-    # 现代化旧式 (3,4) cmap → (3,1) Unicode；转换后 (3,4) name 记录不再被 GDI 需要，
-    # 删除原本的繁体信息（Big5 字节在简体系统会乱码、纯 ASCII 名会被 GDI 拒绝）
-    if _modernize_legacy_cmap(font):
+    # 现代化旧式非 Unicode cmap → (3,1)；转换后对应的旧 name 记录不再被 GDI 需要，
+    # 删除原本的过时信息（旧编码字节在简体系统按 GBK 读会乱码、纯 ASCII 名会被拒）
+    legacy_enc = _modernize_legacy_cmap(font)
+    if legacy_enc is not None:
         for langID in _MANAGED_LANGIDS:
-            font["name"].removeNames(platformID=3, platEncID=4, langID=langID)
+            font["name"].removeNames(platformID=3, platEncID=legacy_enc, langID=langID)
+    # 删除旧式 Mac 中文名字记录（Big5 乱码 / 旧名），无论 cmap 是否已升级都要清
+    _clean_legacy_mac_names(font)
     # adjust the values
     adjust_values(font, font_setting)
     # 清洗旧式 Windows 组记录的头尾空白（(3,10) 等未被删除的旧组）
