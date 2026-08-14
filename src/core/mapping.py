@@ -8,13 +8,16 @@ from fontTools.ttLib.tables._n_a_m_e import NameRecord
 from core import metadata as _metadata
 from core.models import LANGS, MANAGED_NAME_IDS, FontEntry
 
-# 四个逻辑语言 → Windows 主记录组
-WINDOWS_LANG = {
-    "SC": (3, 1, 0x0804),
-    "TC": (3, 1, 0x0404),
-    "JA": (3, 1, 0x0411),
-    "EN": (3, 1, 0x0409),
+# 四个逻辑语言 → Windows 语言 ID（langID；Windows 平台记录按 langID 识别，不挑 platEncID）
+_WINDOWS_LANGID = {
+    "SC": 0x0804,
+    "TC": 0x0404,
+    "JA": 0x0411,
+    "EN": 0x0409,
 }
+
+# 默认写入组（platEncID 1 = UCS-2）；老字体用 platEncID 4（UCS-2 旧式）时，写入优先沿用字体已有组
+WINDOWS_LANG = {lang: (3, 1, langid) for lang, langid in _WINDOWS_LANGID.items()}
 
 # 字体中可能存在的非 Windows 记录组 → 逻辑语言（读取 + 保存镜像用）
 MAC_UNICODE_GROUP_LANG = {
@@ -24,25 +27,49 @@ MAC_UNICODE_GROUP_LANG = {
     (0, 4, 0): "EN",      # Unicode 全量
 }
 
-# 读取优先级：四个 Windows 组优先，其次 Mac / Unicode
-_READ_PRIORITY = tuple(WINDOWS_LANG[lang] for lang in LANGS) + tuple(MAC_UNICODE_GROUP_LANG)
+# Windows 常见 platEncID：1(UCS-2) / 4(UCS-2 旧式) / 10(Full UCS)——老字体常只有 4
+_WINDOWS_ENCS = (1, 4, 10)
+
+# 读取优先级：四个 Windows 组（各 platEncID，1 优先）在前，其次 Mac / Unicode
+_READ_PRIORITY = tuple(
+    (3, enc, _WINDOWS_LANGID[lang]) for lang in LANGS for enc in _WINDOWS_ENCS
+) + tuple(MAC_UNICODE_GROUP_LANG)
 
 
 def _group_lang(group: tuple[int, int, int]) -> str | None:
-    """把原始记录组解析为逻辑语言；未映射（小语种/区域变体）返回 None。"""
+    """把原始记录组解析为逻辑语言；未映射（小语种/区域变体）返回 None。
+
+    Windows 平台（platformID=3）按 langID 识别，platEncID 1/4/10 都算同一语言
+    ——旧 TrueType 字体常以 platEncID=4 存储，只认 (3,1,*) 会读不到记录。
+    """
     if group in MAC_UNICODE_GROUP_LANG:
         return MAC_UNICODE_GROUP_LANG[group]
-    for lang, g in WINDOWS_LANG.items():
-        if g == group:
-            return lang
+    if group[0] == 3:
+        return _LANGID_TO_LANG.get(group[2])
     return None
 
 
+_LANGID_TO_LANG = {v: k for k, v in _WINDOWS_LANGID.items()}
+
+
 def _all_groups_of_lang(lang: str) -> list[tuple[int, int, int]]:
-    """某个逻辑语言涉及的所有记录组（Windows 主组 + 可能存在的 Mac/Unicode 镜像组）。"""
-    groups = [WINDOWS_LANG[lang]]
+    """某个逻辑语言涉及的所有记录组（Windows 各 platEncID + 可能存在的 Mac/Unicode 镜像组）。"""
+    groups = [(3, enc, _WINDOWS_LANGID[lang]) for enc in _WINDOWS_ENCS]
     groups += [g for g, l in MAC_UNICODE_GROUP_LANG.items() if l == lang]
     return groups
+
+
+def _windows_group(raw_groups: set[tuple[int, int, int]], lang: str) -> tuple[int, int, int]:
+    """逻辑语言的写入组：优先用字体中已有的 Windows 组（任意 platEncID），
+    否则回落默认 (3,1,langID)。
+
+    避免为 platEncID=4 的老字体另建 (3,1) 组，造成新旧两组并存、字体内名称不更新。
+    """
+    langid = _WINDOWS_LANGID[lang]
+    for g in raw_groups:
+        if g[0] == 3 and g[2] == langid:
+            return g
+    return WINDOWS_LANG[lang]
 
 
 def _encodable(group: tuple[int, int, int], value: str) -> bool:
@@ -118,7 +145,7 @@ def build_font_setting(entry: FontEntry) -> dict:
         if not any(entry.names[lang][n].strip() for n in MANAGED_NAME_IDS):
             continue  # 勾选但内容全空 → 不新建
 
-        group = WINDOWS_LANG[lang]
+        group = _windows_group(entry._raw_groups, lang)
         for name_id in MANAGED_NAME_IDS:
             # 16 一律写入家族名（含 16←1 回退），否则 prepare_metadata 会因首选家族
             # 为空而把整组记录删掉。占位符不做解析——保存只负责写入，「解析」按钮负责解析。

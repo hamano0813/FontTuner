@@ -331,17 +331,21 @@ class FontTreeModel(QAbstractItemModel):
     # ---------------------------------------------------------------- 复制粘贴（按视觉行）
 
     def copy_selection(self, indexes) -> bool:
-        """把选中的视觉行（父行或子行）复制为 TSV：每行含全部列，对方类型列留空。
+        """把选中的视觉行（父行或子行）复制为 TSV：只含选中列，对方类型列留空。
 
-        子行是某语言 → 该语言子列；跨字体粘贴时按节点类型对齐。
+        只复制被选中的列：单选某格只复制该格，跨列多选复制所选各列，整行/整字体
+        全选才整行复制。粘贴按列位置对齐，未选列留空不会被写入——避免「复制字符集
+        却把同行的字体名/家族名一起带过去」。
         """
         if not indexes:
             return False
         rows: dict[tuple[int, int], None] = {}
+        selected_cols: set[int] = set()
         for idx in indexes:
             if not idx.isValid():
                 continue
             rows.setdefault((self.font_of(idx), self.node_of(idx)), None)
+            selected_cols.add(idx.column())
         if not rows:
             return False
         lines = []
@@ -349,7 +353,10 @@ class FontTreeModel(QAbstractItemModel):
             entry = self._entries[font_idx]
             lang = None if _is_parent_node(node) else LANGS[node - 1]
             cells = []
-            for col in self._columns:
+            for ci, col in enumerate(self._columns):
+                if ci not in selected_cols:
+                    cells.append("")  # 未选列留空，粘贴不写入
+                    continue
                 valid = _is_parent_node(node) == (col.key[0] == "fixed")
                 value = self._get_value(entry, col.key, lang) if valid else None
                 cells.append(self._copy_text(col, value))
