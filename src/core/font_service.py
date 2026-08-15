@@ -68,7 +68,8 @@ def rename_placeholder_help() -> str:
     return (
         "重命名模板支持以下变量（xx = sc/tc/jp/en，简/繁/日/英）：\n"
         "· 字体名 {name_xx} · 字重 {weight_xx} · 字宽 {width_xx} · 斜体 {italic_xx} · 字符集 {charset_xx}\n"
-        "· 家族名 {family_xx} · 子家族名 {subfamily_xx} · 首选家族名 {preferred_family_xx} · 版本号 {version_xx}\n"
+        "· 家族名 {family_xx} · 子家族名 {subfamily_xx} · 唯一标识 {unique_id_xx} · 全名 {full_name_xx}\n"
+        "· 首选家族名 {preferred_family_xx} · 首选子家族名 {preferred_subfamily_xx} · PostScript 字体名 {postscript_xx} · 版本号 {version_xx}\n"
         "· 字重数值 {weight_num} · 字宽数值 {width_num}"
     )
 
@@ -109,7 +110,11 @@ def _rename_vars(entry: FontEntry) -> dict[str, str]:
         vars[f"charset_{code}"] = entry.charsets[lang]
         vars[f"family_{code}"] = names.get(1, "")
         vars[f"subfamily_{code}"] = names.get(2, "")
+        vars[f"unique_id_{code}"] = names.get(3, "")    # 唯一标识
+        vars[f"full_name_{code}"] = names.get(4, "")    # 全名
         vars[f"preferred_family_{code}"] = names.get(16, "")
+        vars[f"preferred_subfamily_{code}"] = names.get(17, "")
+        vars[f"postscript_{code}"] = names.get(6, "")   # PostScript 字体名
         vars[f"version_{code}"] = names.get(5, "")
     # 兼容旧版占位符（按语言优先级解析）
     vars.update({

@@ -234,7 +234,11 @@ def _format_vars(entry: FontEntry, lang: str) -> dict[str, object]:
         vars[f"italic_{suffix}"] = _entry_label(entry, "italic", entry.italic(), l)
         vars[f"family_{suffix}"] = names.get(1, "")
         vars[f"subfamily_{suffix}"] = names.get(2, "")
+        vars[f"unique_id_{suffix}"] = names.get(3, "")    # 唯一标识
+        vars[f"full_name_{suffix}"] = names.get(4, "")    # 全名
         vars[f"preferred_family_{suffix}"] = names.get(16, "")
+        vars[f"preferred_subfamily_{suffix}"] = names.get(17, "")
+        vars[f"postscript_{suffix}"] = names.get(6, "")   # PostScript 字体名
         vars[f"version_{suffix}"] = names.get(5, "")
     # 字符集 4 列：{charset_sc}/{charset_tc}/{charset_jp}/{charset_en}
     for l, code in CHARSET_TEMP_CODES.items():
