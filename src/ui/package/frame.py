@@ -6,7 +6,7 @@
 
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -39,7 +39,7 @@ from qfluentwidgets import (
 from qfluentwidgets.common.smooth_scroll import SmoothMode
 
 from config import option
-from core import package
+from core import font_io, package
 from ui.package.worker import PackWorker, UnpackWorker
 
 
@@ -85,6 +85,16 @@ class PackageFrame(QFrame):
 
         self.unpack_out_dir.setText(option.package_out_dir.value)
         self.pack_out_dir.setText(option.package_out_dir.value)
+
+        # 拖放导入：把字体文件/文件夹从资源管理器拖到本页，按类型自动分发——
+        # 集合文件(.ttc/.otc)进解包列表、单字体(.ttf/.otf)进打包列表。注意必须以
+        # 普通（非管理员）权限运行——管理员权限触发 Windows UIPI，收不到 Explorer
+        # 发起的 OLE 拖放。
+        self.setAcceptDrops(True)
+        # 列表 viewport 单独启用拖放并转发给页面处理（QAbstractScrollArea 会拦截拖放事件）
+        for viewport in (self.unpack_tree.viewport(), self.pack_list.viewport()):
+            viewport.setAcceptDrops(True)
+            viewport.installEventFilter(self)
 
     # ---------------------------------------------------------------- 解包面板
 
@@ -291,12 +301,20 @@ class PackageFrame(QFrame):
         if not files:
             return
         qconfig.set(option.import_dir, os.path.dirname(files[0]))
+        self._add_pack_files(files)
+
+    def _add_pack_files(self, paths: list[str]) -> int:
+        """把单字体文件加入打包列表（去重、保序），返回实际新增数量。"""
         existing = {self.pack_list.item(i).text() for i in range(self.pack_list.count())}
-        for path in files:
+        added = 0
+        for path in paths:
             if path not in existing:
                 self.pack_list.addItem(QListWidgetItem(path))
                 existing.add(path)
-        self._update_pack_name_default()
+                added += 1
+        if added:
+            self._update_pack_name_default()
+        return added
 
     def _on_pack_remove(self):
         for item in self.pack_list.selectedItems():
@@ -341,6 +359,96 @@ class PackageFrame(QFrame):
         if errors:
             InfoBar.error("打包完成（部分失败）", f"{len(errors)} 个文件打包失败：{errors[0][0]}",
                           parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+
+    # ---------------------------------------------------------------- 拖放导入
+
+    _FONT_SUFFIXES = {".ttf", ".otf", ".ttc", ".otc"}
+
+    def _dropped_font_paths(self, event) -> list[str]:
+        """从拖放事件提取本地字体文件/文件夹路径；非字体或外部路径忽略。"""
+        paths = []
+        mime = event.mimeData()
+        if mime.hasUrls():
+            for url in mime.urls():
+                if not url.isLocalFile():
+                    continue
+                p = url.toLocalFile()
+                if os.path.isdir(p) or os.path.splitext(p)[1].lower() in self._FONT_SUFFIXES:
+                    paths.append(p)
+        return paths
+
+    def _accept_font_drop(self, event) -> bool:
+        """拖入内容含字体文件/文件夹则接受（显示放置光标），否则交给默认处理。"""
+        if self._dropped_font_paths(event):
+            event.acceptProposedAction()
+            return True
+        return False
+
+    def eventFilter(self, obj, event):
+        """两个列表 viewport 的拖放事件转发给页面处理（滚动区会拦截不往父级传）。"""
+        et = event.type()
+        if obj in (self.unpack_tree.viewport(), self.pack_list.viewport()) and et in (
+            QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop,
+        ):
+            if et == QEvent.Type.Drop:
+                self.dropEvent(event)
+            else:
+                self._accept_font_drop(event)
+            return True
+        return super().eventFilter(obj, event)
+
+    def dragEnterEvent(self, event):
+        if not self._accept_font_drop(event):
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if not self._accept_font_drop(event):
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        """把拖入的字体文件/文件夹按类型加入解包/打包列表。"""
+        paths = self._dropped_font_paths(event)
+        if not paths:
+            super().dropEvent(event)
+            return
+        if self._worker is not None:
+            InfoBar.warning("正在处理中", "请等待当前任务完成后再次拖放。",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+            return
+        self._import_dropped(paths)
+        event.acceptProposedAction()
+
+    def _import_dropped(self, paths: list[str]) -> None:
+        """按类型分发拖入的文件：集合文件进解包列表、单字体进打包列表。"""
+        fonts = font_io.collect_font_files(paths)
+        collections = [p for p in fonts if font_io.is_collection(p)]
+        singles = [p for p in fonts if not font_io.is_collection(p)]
+
+        # 集合文件去重：树里已有同路径根节点则跳过（打包列表由 _add_pack_files 去重）
+        existing_roots = {
+            self.unpack_tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole)
+            for i in range(self.unpack_tree.topLevelItemCount())
+        }
+        added_c = 0
+        for path in collections:
+            if path in existing_roots:
+                continue
+            self._add_collection(path)
+            added_c += 1
+
+        added_p = self._add_pack_files(singles)
+
+        if not added_c and not added_p:
+            InfoBar.warning("没有可导入的字体", "拖入的内容里没有 TTF/OTF/TTC/OTC 字体文件。",
+                            parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+            return
+        parts = []
+        if added_c:
+            parts.append(f"{added_c} 个集合文件加入解包列表")
+        if added_p:
+            parts.append(f"{added_p} 个字体加入打包列表")
+        InfoBar.success("拖放导入", "，".join(parts),
+                        parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
 
     # ---------------------------------------------------------------- 公共
 
