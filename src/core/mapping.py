@@ -173,9 +173,10 @@ def build_font_setting(entry: FontEntry) -> dict:
 
         group = _windows_group(lang)
         for name_id in MANAGED_NAME_IDS:
-            # 16 一律写入家族名（含 16←1 回退），否则 prepare_metadata 会因首选家族
-            # 为空而把整组记录删掉。占位符不做解析——保存只负责写入，「解析」按钮负责解析。
-            value = family if name_id == 16 else entry.names[lang][name_id]
+            # 16 不再强制回退家族名：手填优先、留空即删；整组是否保留改由
+            # prepare_metadata 按「16 或 1 任一有值」判断（见 metadata.py）。
+            # 占位符不做解析——保存只负责写入，「解析」按钮负责解析。
+            value = entry.names[lang][name_id]
             if name_id == 5 and not str(value).strip() and fallback_version:
                 value = fallback_version  # 版本号空 → 用字体已有版本
             setting[(name_id, *group)] = value
@@ -187,7 +188,8 @@ def build_font_setting(entry: FontEntry) -> dict:
             if not _encodable(mirror, family):
                 continue
             for name_id in MANAGED_NAME_IDS:
-                value = family if name_id == 16 else entry.names[lang][name_id]
+                # 16 同样手填优先（不再强制回退家族名），与 Windows 主组一致
+                value = entry.names[lang][name_id]
                 if name_id in (16, 17) or _encodable(mirror, value):
                     setting[(name_id, *mirror)] = value
     return setting

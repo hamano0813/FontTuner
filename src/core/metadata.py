@@ -126,8 +126,12 @@ def prepare_metadata(font: TTFont, font_setting: dict):
         # skip if the langID is already in the set
         if (platformID, platEncID, langID) in langIDs:
             continue
-        # get the font family
-        if not (p_family := font_setting.get((16, platformID, platEncID, langID)).strip()):
+        # 整组是否保留：首选家族(16) 与 家族名(1) 任一非空即保留。16 已不再强制
+        # 回退 1（见 mapping.build_font_setting），若仍以 16 为准，用户清空 16 会把
+        # 整组误删——清空 16 的语义应只是删除 16 记录本身
+        p_family = font_setting.get((16, platformID, platEncID, langID), "").strip()
+        f_family = font_setting.get((1, platformID, platEncID, langID), "").strip()
+        if not (p_family or f_family):
             # remove all names if the font family is empty
             font["name"].removeNames(platformID=platformID, platEncID=platEncID, langID=langID)
         else:
@@ -157,24 +161,35 @@ def fetch_metadata(font: TTFont, font_setting: dict, langIDs):
             font["name"].setName(subfamily, 2, platformID, platEncID, langID)
         else:
             font["name"].removeNames(2, platformID, platEncID, langID)
-        # 3 Unique ID
-        unique_id = font_setting.get((3, platformID, platEncID, langID), "{} {}").format(p_family, s_family, *([""] * 3)).strip()
-        font["name"].setName(unique_id, 3, platformID, platEncID, langID)
-        # 4 Full Name（子族名为空时只保留家族名；尾随空格会让 Windows GDI 拒绝注册该字体）
-        full_name = f"{p_family} {s_family}".strip()
-        font["name"].setName(full_name, 4, platformID, platEncID, langID)
-        # 6 PostScript Name
-        # sub loop through all langIDs
-        for pid, eid, lid in langIDs:
-            # get the preferred font family and subfamily for the sub loop
-            p_fam = font_setting.get((16, pid, eid, lid), "")
-            s_fam = font_setting.get((17, pid, eid, lid), "")
-            # set the PostScript Name when the subfamily are ASCII（空家族/子家族名跳过，
-            # 避免生成 "Foo-" / "-Bold" 这类畸形 PS 名）
-            if p_fam and s_fam and s_fam.isascii():
-                ps_name = f"{p_fam}-{s_fam}".replace(" ", "-")
-                font["name"].setName(ps_name, 6, platformID, platEncID, langID)
-                break
+        # 3 Unique ID（手填原样写；留空则删除——不再把 {} 当模板拼接）
+        unique_id = font_setting.get((3, platformID, platEncID, langID), "").strip()
+        if unique_id:
+            font["name"].setName(unique_id, 3, platformID, platEncID, langID)
+        else:
+            font["name"].removeNames(3, platformID, platEncID, langID)
+        # 4 Full Name（手填的全名优先；空则按 首选家族+首选子家族 拼接，
+        # 尾随空格会让 Windows GDI 拒绝注册该字体，统一 strip）
+        full_name = font_setting.get((4, platformID, platEncID, langID), "").strip()
+        if not full_name:
+            full_name = f"{p_family} {s_family}".strip()
+        if full_name:
+            font["name"].setName(full_name, 4, platformID, platEncID, langID)
+        else:
+            font["name"].removeNames(4, platformID, platEncID, langID)
+        # 6 PostScript Name（手填的字体名优先；空则按 首选家族-子家族 自动生成，
+        # 子家族为空/非 ASCII 时跳过，避免 "Foo-" / "-Bold" 这类畸形 PS 名）
+        ps_name = font_setting.get((6, platformID, platEncID, langID), "").strip()
+        if not ps_name:
+            for pid, eid, lid in langIDs:
+                p_fam = font_setting.get((16, pid, eid, lid), "")
+                s_fam = font_setting.get((17, pid, eid, lid), "")
+                if p_fam and s_fam and s_fam.isascii():
+                    ps_name = f"{p_fam}-{s_fam}".replace(" ", "-")
+                    break
+        if ps_name:
+            font["name"].setName(ps_name, 6, platformID, platEncID, langID)
+        else:
+            font["name"].removeNames(6, platformID, platEncID, langID)
 
 
 def _clean_legacy_names(font: TTFont) -> None:
@@ -333,13 +348,12 @@ def apply_font_settings(font: TTFont, font_setting: dict, remove_groups=()):
         nameID, platformID, platEncID, langID = key
         # get the preferred font family and subfamily
         p_family = font_setting.get((16, platformID, platEncID, langID), "")
-        s_family = font_setting.get((17, platformID, platEncID, langID), "")
-        # 信息字段（版权/版本/商标/描述等）只要有家族名即写；家族方案字段（16/17/256/
-        # 257 首选/WWS 家族子家族）才需要首选子家族齐全——老字体缺 nid 17 时也要能写入
-        # 版本号(5)，否则 Windows 预览回退读 Mac 记录而乱码
-        if nameID not in (1, 2, 3, 4, 6) and p_family and (
-            s_family or nameID not in (16, 17, 256, 257)
-        ):
+        f_family = font_setting.get((1, platformID, platEncID, langID), "")
+        # 写入门控：整组只要有 家族名(1) 或 首选家族名(16) 即可写/删各字段。
+        # 16/17/256/257 不再要求首选子家族齐全——老字体缺 nid 17 时也要能写入
+        # 版本号(5)，否则 Windows 预览回退读 Mac 记录而乱码。各字段独立
+        # 「有值写、空删」，用户清空首选家族/子家族名能真正删掉旧记录
+        if nameID not in (1, 2, 3, 4, 6) and (p_family or f_family):
             if value:
                 font["name"].setName(value, nameID, platformID, platEncID, langID)
             else:
