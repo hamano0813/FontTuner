@@ -331,31 +331,31 @@ class FontTreeModel(QAbstractItemModel):
     # ---------------------------------------------------------------- 复制粘贴（按视觉行）
 
     def copy_selection(self, indexes) -> bool:
-        """把选中的视觉行（父行或子行）复制为 TSV：只含选中列，对方类型列留空。
+        """把选中的视觉行（父行或子行）复制为 TSV：只含选中格，对方类型列留空。
 
-        只复制被选中的列：单选某格只复制该格，跨列多选复制所选各列，整行/整字体
-        全选才整行复制。粘贴按列位置对齐，未选列留空不会被写入——避免「复制字符集
-        却把同行的字体名/家族名一起带过去」。
+        只复制被选中的格子：单选某格只复制该格，跨列多选复制所选各格——按
+        (行, 列) 精确记录，不做 rows×selected_cols 笛卡尔积（否则会把同行的
+        未选列/同列的未选行一起带出）。粘贴按列位置对齐，未选格留空不会被写入，
+        避免「复制字符集却把同行的字体名/家族名一起带过去」。
         """
         if not indexes:
             return False
-        rows: dict[tuple[int, int], None] = {}
-        selected_cols: set[int] = set()
+        # (视觉行) -> 该行被选中的列集合
+        sel_cells: dict[tuple[int, int], set[int]] = {}
         for idx in indexes:
             if not idx.isValid():
                 continue
-            rows.setdefault((self.font_of(idx), self.node_of(idx)), None)
-            selected_cols.add(idx.column())
-        if not rows:
+            sel_cells.setdefault((self.font_of(idx), self.node_of(idx)), set()).add(idx.column())
+        if not sel_cells:
             return False
         lines = []
-        for font_idx, node in sorted(rows):
+        for (font_idx, node), cols in sorted(sel_cells.items()):
             entry = self._entries[font_idx]
             lang = None if _is_parent_node(node) else LANGS[node - 1]
             cells = []
             for ci, col in enumerate(self._columns):
-                if ci not in selected_cols:
-                    cells.append("")  # 未选列留空，粘贴不写入
+                if ci not in cols:
+                    cells.append("")  # 未选格留空，粘贴不写入
                     continue
                 valid = _is_parent_node(node) == (col.key[0] == "fixed")
                 value = self._get_value(entry, col.key, lang) if valid else None
@@ -370,13 +370,32 @@ class FontTreeModel(QAbstractItemModel):
         保留行首/行尾空 Tab（子行前 7 个父列空），空单元格不覆盖（避免跨类型
         粘贴误清值）；不可编辑格由 setData 自动跳过。视觉行 = 字体序号×5 + 节点序号，
         整字体复制（父+4子）粘贴到父行可整体回填。
+        空行不丢弃（去掉首尾空行即可）：跨列复制可能产生整行无值的中间行，
+        若过滤会使后续行视觉行错位。
         """
         text = QApplication.clipboard().text()
         if not text:
             return 0
-        lines = [ln.rstrip("\r") for ln in text.split("\n") if ln.strip()]
+        lines = [ln.rstrip("\r") for ln in text.split("\n")]
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
         if not lines:
             return 0
+        # 剪贴板非空格的最左列位置：粘贴以目标格为对齐点——剪贴板第 ci 列写到
+        # 目标列 col+(ci-col_offset)。这样单格复制（如字体名列）粘到任意列（如
+        # 家族名列）能落到目标格，而不是按剪贴板绝对列位置写回原列；跨列多选
+        # 矩形复制则保持列相对结构（字重→字重、字宽→字宽）。
+        nonempty_cols = [
+            ci
+            for line in lines
+            for ci, cell in enumerate(line.split("\t"))
+            if cell.strip()
+        ]
+        if not nonempty_cols:
+            return 0
+        col_offset = min(nonempty_cols)
         start_visual = self.font_of(index) * 5 + self.node_of(index)
         if start_visual < 0:
             return 0
@@ -390,7 +409,10 @@ class FontTreeModel(QAbstractItemModel):
                     break
                 if not cell.strip():
                     continue
-                if self.setData(self._index_node(font_idx, node, ci), cell,
+                target_col = col + (ci - col_offset)
+                if target_col < 0 or target_col >= len(self._columns):
+                    continue
+                if self.setData(self._index_node(font_idx, node, target_col), cell,
                                 Qt.ItemDataRole.EditRole):
                     count += 1
         return count
