@@ -5,6 +5,45 @@ from __future__ import annotations
 from fontTools.ttLib import TTFont
 
 
+def _looks_utf16_mojibake(text: str) -> bool:
+    """名义编码解出的 name 文本是否明显是错标的 UTF-16-BE 字节。
+
+    老字体常把 platEncID 标成旧式编码、实际字节却是 UTF-16-BE（如 Edokan.ttc 的
+    (3,2) 记录），fontTools 按名义编码（shift_jis 等）解会混出半角假名或嵌控制符，
+    据此判定后回退按 UTF-16-BE 重解。
+    """
+    if any(0xFF61 <= ord(c) <= 0xFF9F for c in text):  # 半角假名区（正常名字里基本没有）
+        return True
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in text):  # NUL 等控制符
+        return True
+    return False
+
+
+def _decode_name_record(record) -> str:
+    """读取 name 记录文本；旧式 Windows 编码（encID 2/3/4/5/6）兼容错标 UTF-16-BE。
+
+    老字体（如 Edokan.ttc）常把 platEncID 标成旧式编码、实际字节却是 UTF-16-BE：
+    fontTools 按名义编码解要么解出半角假名/控制符乱码、要么直接抛 UnicodeDecodeError。
+    两种情况都改按 UTF-16-BE 重解；仍解不出时返回原始字节（bytes），保持旧行为。
+    """
+    legacy = record.platformID == 3 and record.platEncID in _CMAP_LEGACY_CODECS
+    try:
+        text = record.toUnicode()
+    except UnicodeDecodeError:
+        if not legacy:
+            return record.toBytes()
+        try:
+            return record.toBytes().decode("utf-16-be")
+        except UnicodeDecodeError:
+            return record.toBytes()
+    if legacy and _looks_utf16_mojibake(text):
+        try:
+            return record.toBytes().decode("utf-16-be")
+        except UnicodeDecodeError:
+            return text
+    return text
+
+
 def load_metadata(font: TTFont):
     """Load the metadata of the font and return them as a dictionary."""
     # init the font settings
@@ -26,10 +65,7 @@ def load_metadata(font: TTFont):
         # add the langID to the set
         langIDs.add((platFormID, platEncID, langID))
         # add the record to the font settings
-        try:
-            font_setting[(nameID, platFormID, platEncID, langID)] = record.toUnicode()
-        except UnicodeDecodeError:
-            font_setting[(nameID, platFormID, platEncID, langID)] = record.toBytes()
+        font_setting[(nameID, platFormID, platEncID, langID)] = _decode_name_record(record)
     # convert the set to a list
     langIDs = list(langIDs)
     # loop through all langIDs

@@ -28,8 +28,11 @@ MAC_UNICODE_GROUP_LANG = {
     (0, 4, 0): "EN",      # Unicode 全量
 }
 
-# Windows 常见 platEncID：1(UCS-2) / 4(UCS-2 旧式) / 10(Full UCS)——老字体常只有 4
-_WINDOWS_ENCS = (1, 4, 10)
+# Windows 常见 platEncID：1(UCS-2) / 4(UCS-2 旧式) / 10(Full UCS)——
+# 老字体常只有 4；再加旧式非 Unicode 编码 2(ShiftJIS)/3(GBK)/5(Wansung)/6(Johab)
+# 兜底读取（如 Edokan.ttc 的 (3,2) 名字记录）。Unicode 组在前、旧式在后，读取时
+# Unicode 优先，旧式只填空缺；decode 兼容错标 UTF-16-BE 的字节（见 metadata/names）
+_WINDOWS_ENCS = (1, 4, 10, 2, 3, 5, 6)
 
 # 读取优先级：四个 Windows 组（各 platEncID，1 优先）在前，其次 Mac / Unicode
 _READ_PRIORITY = tuple(

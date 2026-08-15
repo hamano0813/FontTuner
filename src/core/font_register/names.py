@@ -34,15 +34,49 @@ _MAC_CODECS = {
     3: "mac_korean", 7: "mac_cyrillic", 21: "mac_thai", 4: "mac_arabic", 5: "mac_hebrew",
 }
 
+# Windows 旧式非 Unicode 编码 → codec（(3,2)ShiftJIS/(3,3)GBK/(3,4)Big5/(3,5)Wansung/(3,6)Johab）
+_LEGACY_WIN_CODECS = {2: "cp932", 3: "cp936", 4: "cp950", 5: "cp949", 6: "cp1361"}
+
+
+def _looks_utf16_mojibake(text: str) -> bool:
+    """名义编码解出的文本是否明显是错标的 UTF-16-BE 字节。
+
+    老字体常把 platEncID 标成旧式编码、实际字节却是 UTF-16-BE（如 Edokan.ttc 的
+    (3,2) 记录）。UTF-16-BE 字节按 ShiftJIS/Big5 等解码会混出半角假名或嵌控制符，
+    据此判定后回退按 UTF-16-BE 重解。
+    """
+    if any(0xFF61 <= ord(c) <= 0xFF9F for c in text):  # 半角假名区（正常名字里基本没有）
+        return True
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in text):  # NUL 等控制符
+        return True
+    return False
+
 
 def _decode_name_raw(platform: int, enc: int, raw: bytes) -> str:
     """按平台/编码解码 name 记录文本。
 
     Mac(1) 用对应 mac_* 编码（CJK 记录须 mac_japanese/simpchinese 等，mac_roman 会乱码）；
     Windows(3)/Unicode(0) 为 UTF-16（平台 0 enc 4 为小端）。
+    旧式 Windows 编码（enc 2/3/4/5/6）先按名义编码解，结果明显是错标的 UTF-16-BE
+    （半角假名/控制符）时回退按 UTF-16-BE 解。
     """
     if platform == 1:
-        return raw.decode(_MAC_CODECS.get(enc, "mac_roman"))
+        try:
+            return raw.decode(_MAC_CODECS.get(enc, "mac_roman"))
+        except (UnicodeDecodeError, LookupError):
+            return raw.decode("latin-1", "replace")
+    codec = _LEGACY_WIN_CODECS.get(enc)
+    if platform == 3 and codec is not None:
+        try:
+            nominal = raw.decode(codec)
+        except (UnicodeDecodeError, LookupError):
+            nominal = None
+        if nominal is not None and not _looks_utf16_mojibake(nominal):
+            return nominal
+        try:
+            return raw.decode("utf-16-be")
+        except UnicodeDecodeError:
+            return nominal or raw.decode("latin-1", "replace")
     return raw.decode("utf-16-le" if platform == 0 and enc == 4 else "utf-16-be")
 
 
