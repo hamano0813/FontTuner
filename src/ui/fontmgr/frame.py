@@ -362,6 +362,8 @@ class FontManagerFrame(QFrame):
             self._saved_expanded = self._snapshot_expanded()
             self._apply_filter(self.filter_edit.text())
             self._expand_visible_dirs()
+            if not self._dup_keys:
+                self.status_label.setText("未发现重复字体（Windows 标准字体名+子家族名相同且 ≥2 个）")
         else:
             # 反向：恢复普通过滤（全部显示），并把父节点展开态还原到打开前
             self._apply_filter(self.filter_edit.text())
@@ -413,12 +415,15 @@ class FontManagerFrame(QFrame):
         「检查重复」激活时：字体条目（含 TTC 整体）须命中重复组合才可见；
         TTC 的 face 子项仅展示、跟随父节点可见性，不独立参与过滤。
         """
+        # 「检查重复」激活与否用按钮状态判断，不能用 _dup_keys 真值——空重复集合是
+        # falsy，若以此当开关，无重复时会跳过整个过滤、全部字体照常显示（无过滤效果）
+        dup_active = self.dup_button.isChecked()
         self_match = (not text
                       or text in item.text(0).lower()
                       or text in item.text(1).lower()
                       or text in (item.toolTip(0) or "").lower())
         is_font = bool(item.data(0, Qt.ItemDataRole.UserRole + 6))
-        if is_font and self._dup_keys:
+        if is_font and dup_active:
             self_match = self_match and (item.text(1), item.text(2)) in self._dup_keys
         if is_font:
             # 字体条目是过滤叶子：其 TTC face 子项只随父显示
@@ -432,7 +437,7 @@ class FontManagerFrame(QFrame):
                     child_visible = True
             # 重复过滤时：目录只看有无可见子项（空目录即使名字匹配也隐藏）；
             # 普通过滤时：自身匹配或任一子项匹配都可见
-            visible = child_visible if self._dup_keys else (self_match or child_visible)
+            visible = child_visible if dup_active else (self_match or child_visible)
         else:
             visible = self_match
         item.setHidden(not visible)
